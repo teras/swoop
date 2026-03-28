@@ -1,4 +1,5 @@
-import std/[os, re]
+import std/os
+import regex
 import ../types
 
 proc parseBuildDir(dir: string): string =
@@ -8,11 +9,11 @@ proc parseBuildDir(dir: string): string =
       continue
     try:
       let content = readFile(path)
-      var m: array[1, string]
-      if content.find(re"""layout\s*\.\s*buildDirectory\s*\.\s*set\s*\(\s*file\s*\(\s*["']([^"']+)["']""", m) >= 0:
-        return m[0]
-      if content.find(re"""buildDir\s*=\s*(?:file\s*\(\s*)?["']([^"']+)["']""", m) >= 0:
-        return m[0]
+      var m: RegexMatch2
+      if content.find(re2"""layout\s*\.\s*buildDirectory\s*\.\s*set\s*\(\s*file\s*\(\s*["']([^"']+)["']""", m):
+        return content[m.group(0)]
+      if content.find(re2"""buildDir\s*=\s*(?:file\s*\(\s*)?["']([^"']+)["']""", m):
+        return content[m.group(0)]
     except:
       discard
   return ""

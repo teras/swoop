@@ -1,4 +1,4 @@
-import std/[os, strutils]
+import std/os
 import ../types
 
 proc analyzeMeson*(dir: string): AnalyzeResult =

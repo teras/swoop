@@ -1,4 +1,5 @@
-import std/[os, strutils, re]
+import std/[os, strutils]
+import regex
 import ../types
 
 type NimbleInfo = object
@@ -11,14 +12,14 @@ proc parseNimbleFile(dir: string): NimbleInfo =
     if not path.extractFilename.endsWith(".nimble"): continue
     try:
       let content = readFile(path)
-      var m: array[1, string]
-      if content.find(re"""bin\s*=\s*@\[([^\]]+)\]""", m) >= 0:
-        for entry in m[0].split(','):
+      var m: RegexMatch2
+      if content.find(re2"""bin\s*=\s*@\[([^\]]+)\]""", m):
+        for entry in content[m.group(0)].split(','):
           let name = entry.strip().strip(chars = {'"', '\''})
           if name.len > 0:
             result.bins.add name
-      if content.find(re"""srcDir\s*=\s*["']([^"']+)["']""", m) >= 0:
-        result.srcDir = m[0]
+      if content.find(re2"""srcDir\s*=\s*["']([^"']+)["']""", m):
+        result.srcDir = content[m.group(0)]
     except:
       discard
     break

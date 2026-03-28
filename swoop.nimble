@@ -9,3 +9,4 @@ bin           = @["swoop"]
 # Dependencies
 requires "nim >= 2.0.0"
 requires "parsetoml >= 0.7.0"
+requires "regex >= 0.20.0"

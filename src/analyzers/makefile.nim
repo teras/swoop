@@ -1,4 +1,5 @@
-import std/[os, strutils, re]
+import std/[os, strutils]
+import regex
 import ../types
 
 proc parseIncludeVars(dir: string, makefile: string): seq[tuple[key, value: string]] =
@@ -6,17 +7,16 @@ proc parseIncludeVars(dir: string, makefile: string): seq[tuple[key, value: stri
   try:
     let content = readFile(dir / makefile)
     for line in content.splitLines():
-      # Look for: include config.mk
-      var m: array[1, string]
-      if line.match(re"^-?include\s+(\S+)", m):
-        let incPath = dir / m[0]
+      var m: RegexMatch2
+      if line.find(re2"^-?include\s+(\S+)", m):
+        let incPath = dir / line[m.group(0)]
         if fileExists(incPath):
           for incLine in lines(incPath):
             let stripped = incLine.strip()
             if stripped.len == 0 or stripped.startsWith("#"): continue
-            var vm: array[2, string]
-            if stripped.match(re"^([A-Za-z_][A-Za-z0-9_]*)\s*[:?]?=\s*(.*)", vm):
-              result.add (vm[0].strip(), vm[1].strip())
+            var vm: RegexMatch2
+            if stripped.find(re2"^([A-Za-z_][A-Za-z0-9_]*)\s*[:?]?=\s*(.*)", vm):
+              result.add (stripped[vm.group(0)].strip(), stripped[vm.group(1)].strip())
   except:
     discard
 
@@ -39,10 +39,11 @@ proc parseMakefileTarget(dir: string, target: string,
         var rmLine = stripped
         if rmLine.startsWith("rm ") or rmLine.startsWith("-rm ") or rmLine.startsWith("@rm "):
           let isRecursive = "-r" in rmLine or "-rf" in rmLine or "-fR" in rmLine or "-fr" in rmLine
-          rmLine = rmLine.replace(re"^[@-]?rm\s+(-[rfRF]+\s+)*", "")
+          var m: RegexMatch2
+          if rmLine.find(re2"^[@\-]?rm\s+(-[rfRF]+\s+)*", m):
+            rmLine = rmLine[m.boundaries.b + 1 .. ^1]
           for part in rmLine.splitWhitespace():
             var resolved = part
-            # Resolve variables from includes
             for (key, value) in vars:
               resolved = resolved.replace("${" & key & "}", value)
               resolved = resolved.replace("$(" & key & ")", value)

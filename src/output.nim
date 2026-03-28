@@ -74,7 +74,8 @@ proc shortenFolder*(folder: string, maxLen: int): string =
   let parts = folder.split('/')
   # Try removing parts from the left
   for start in 1 ..< parts.len:
-    let candidate = "\u2026/" & parts[start .. ^1].join("/")
+    const ellipsis = when defined(windows): "..." else: "\u2026"
+    let candidate = ellipsis & "/" & parts[start .. ^1].join("/")
     if candidate.len <= maxLen:
       return candidate
   # Can't shorten enough — just the last part
@@ -104,7 +105,8 @@ type
 
 proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, noColor: bool = false) =
   let termWidth = try: terminalWidth() except: 80
-  let useColor = not noColor and isatty(stdout)
+  let useColor = when defined(windows): false
+                 else: not noColor and isatty(stdout)
 
   # Build display data
   var displays: seq[ProjectDisplay]
@@ -170,11 +172,12 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
     let sizeStr = " " & fmtSize(groupSize) & " "
     let lineLen = termWidth - kindStr.len - 1 - sizeStr.len - 1  # -1 for final ─
     let kColor = kindColor(kind)
-    let line = "\u2500".repeat(max(lineLen, 1))
+    const lineCh = when defined(windows): "-" else: "\u2500"
+    let line = lineCh.repeat(max(lineLen, 1))
     let header = if useColor:
-      Bold & kColor & kindStr & Reset & " " & Dim & line & " " & Reset & kColor & fmtSize(groupSize) & Reset & Dim & " \u2500" & Reset
+      Bold & kColor & kindStr & Reset & " " & Dim & line & " " & Reset & kColor & fmtSize(groupSize) & Reset & Dim & " " & lineCh & Reset
     else:
-      kindStr & " " & line & sizeStr & "\u2500"
+      kindStr & " " & line & sizeStr & lineCh
     echo header
 
     for d in projs:
@@ -240,7 +243,10 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
     echo summary
 
 proc printCountProgress*(count: int) =
-  let spinChars = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"]
+  when defined(windows):
+    let spinChars = ["|", "/", "-", "\\"]
+  else:
+    let spinChars = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"]
   let ch = spinChars[(count div 50) mod spinChars.len]
   let line = "Scanning " & ch & " " & $count & " dirs"
   let termWidth = try: terminalWidth() except: 80
