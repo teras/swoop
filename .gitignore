@@ -1,0 +1,5 @@
+*.swp
+.vscode/
+.idea/
+target/
+swoop

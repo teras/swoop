@@ -1,0 +1,238 @@
+import std/[os, strutils, terminal, algorithm, tables]
+import types
+
+const
+  Reset = "\e[0m"
+  Bold = "\e[1m"
+  Dim = "\e[2m"
+  Red = "\e[31m"
+  Green = "\e[32m"
+  Yellow = "\e[33m"
+  Blue = "\e[34m"
+  Cyan = "\e[36m"
+
+proc fmtSize*(bytes: int64): string =
+  if bytes < 0: return "—"
+  if bytes < 1024:
+    return $bytes & "  B"
+  elif bytes < 1024 * 1024:
+    return formatFloat(bytes.float / 1024.0, ffDecimal, 1) & " KB"
+  elif bytes < 1024 * 1024 * 1024:
+    return formatFloat(bytes.float / (1024.0 * 1024.0), ffDecimal, 1) & " MB"
+  else:
+    return formatFloat(bytes.float / (1024.0 * 1024.0 * 1024.0), ffDecimal, 2) & " GB"
+
+proc colorSize(s: string, bytes: int64): string =
+  if bytes >= 1024 * 1024 * 1024: return Red & s & Reset
+  elif bytes >= 100 * 1024 * 1024: return Yellow & s & Reset
+  else: return s
+
+proc kindColor*(kind: ProjectKind): string =
+  Blue
+
+proc primaryKind*(kinds: set[ProjectKind]): ProjectKind =
+  for k in ProjectKind:
+    if k in kinds: return k
+  return pkMakefile
+
+
+proc shortenPath*(path: string, maxLen: int): string =
+  if path.len <= maxLen:
+    return path
+  let parts = path.split('/')
+  if parts.len <= 1:
+    return path
+  var shortened = parts
+  for i in 0 ..< shortened.len - 1:
+    shortened[i] = $shortened[i][0]
+    let candidate = shortened.join("/")
+    if candidate.len <= maxLen:
+      return candidate
+  return shortened.join("/")
+
+proc shortenFolder*(folder: string, maxLen: int): string =
+  ## Shorten a folder path from the LEFT, keeping the rightmost parts.
+  if folder.len <= maxLen:
+    return folder
+  let parts = folder.split('/')
+  # Try removing parts from the left
+  for start in 1 ..< parts.len:
+    let candidate = "\u2026/" & parts[start .. ^1].join("/")
+    if candidate.len <= maxLen:
+      return candidate
+  # Can't shorten enough — just the last part
+  if parts[^1].len <= maxLen:
+    return parts[^1]
+  return folder[^maxLen .. ^1]
+
+proc relativeTo*(path, base: string): string =
+  if path.startsWith(base):
+    var rel = path[base.len .. ^1]
+    if rel.len > 0 and rel[0] in {'/', '\\'}:
+      rel = rel[1 .. ^1]
+    return rel
+  return path
+
+type
+  EntryLine = object
+    folder: string
+    size: string
+    sizeBytes: int64
+
+  ProjectDisplay = object
+    path: string
+    kind: ProjectKind
+    entries: seq[EntryLine]
+    totalSize: int64
+
+proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, noColor: bool = false) =
+  let termWidth = try: terminalWidth() except: 80
+  let useColor = not noColor and isatty(stdout)
+
+  # Build display data
+  var displays: seq[ProjectDisplay]
+  for p in projects:
+    var d = ProjectDisplay(
+      path: p.path.relativeTo(rootPath),
+      kind: primaryKind(p.kinds),
+      totalSize: p.totalSize,
+    )
+    for entry in p.entries:
+      let rel = entry.path.relativePath(p.path) & (if entry.isDir: "/" else: "")
+      d.entries.add EntryLine(folder: rel, size: fmtSize(entry.size), sizeBytes: entry.size)
+    displays.add d
+
+  # Group by primary kind
+  var groups: Table[ProjectKind, seq[ProjectDisplay]]
+  for d in displays:
+    if d.kind notin groups:
+      groups[d.kind] = @[]
+    groups[d.kind].add d
+
+  for kind in ProjectKind:
+    if kind in groups:
+      var sorted = groups[kind]
+      sorted.sort(proc(a, b: ProjectDisplay): int = cmp(b.totalSize, a.totalSize))
+      groups[kind] = sorted
+
+  if projects.len == 0:
+    echo "No cleanable projects found in " & rootPath
+    return
+
+  # Header
+  let mode = if execute: (if useColor: Red & Bold & "[EXECUTE]" & Reset else: "[EXECUTE]")
+             else: (if useColor: Green & "[DRY RUN]" & Reset else: "[DRY RUN]")
+  echo mode & " " & rootPath
+  echo ""
+
+  let indent = 2
+  let gap = 2
+  let minGap = 4
+  var maxSizeLen = 0
+  for d in displays:
+    for e in d.entries:
+      maxSizeLen = max(maxSizeLen, e.size.len)
+  let sizeCol = max(maxSizeLen, 8)
+
+  # Sort groups by total size descending
+  var sortedKinds: seq[tuple[kind: ProjectKind, size: int64]]
+  for kind in ProjectKind:
+    if kind notin groups: continue
+    var total: int64 = 0
+    for d in groups[kind]: total += d.totalSize
+    sortedKinds.add (kind, total)
+  sortedKinds.sort(proc(a, b: tuple[kind: ProjectKind, size: int64]): int = cmp(b.size, a.size))
+
+  # Print each group
+  for (kind, _) in sortedKinds:
+    let projs = groups[kind]
+
+    var groupSize: int64 = 0
+    for d in projs: groupSize += d.totalSize
+    let kindStr = $kind
+    let sizeStr = " " & fmtSize(groupSize) & " "
+    let lineLen = termWidth - kindStr.len - 1 - sizeStr.len - 1  # -1 for final ─
+    let kColor = kindColor(kind)
+    let line = "\u2500".repeat(max(lineLen, 1))
+    let header = if useColor:
+      Bold & kColor & kindStr & Reset & " " & Dim & line & " " & Reset & kColor & fmtSize(groupSize) & Reset & Dim & " \u2500" & Reset
+    else:
+      kindStr & " " & line & sizeStr & "\u2500"
+    echo header
+
+    for d in projs:
+      if d.entries.len == 0:
+        echo " ".repeat(indent) & d.path
+        continue
+
+      for ei, entry in d.entries:
+        let alignedSize = entry.size.align(sizeCol)
+        let rightFixedLen = gap + sizeCol  # " ".repeat(gap) + aligned size
+
+        if ei == 0:
+          # First entry: project name + folder + size must fit in termWidth
+          # First try: shorten path to fit with full folder
+          let availPath1 = termWidth - indent - entry.folder.len - rightFixedLen - minGap
+          let shortPath1 = shortenPath(d.path, max(availPath1, 1))
+          # Check if it fits
+          let totalLen1 = indent + shortPath1.len + minGap + entry.folder.len + rightFixedLen
+          var folder: string
+          var shortPath: string
+          if totalLen1 <= termWidth:
+            folder = entry.folder
+            shortPath = shortPath1
+          else:
+            # Path is already minimally shortened — must cut folder too
+            let minPathLen = shortenPath(d.path, 1).len
+            let maxFolder = termWidth - indent - minPathLen - minGap - rightFixedLen
+            folder = shortenFolder(entry.folder, max(maxFolder, 5))
+            let availPath2 = termWidth - indent - folder.len - rightFixedLen - minGap
+            shortPath = shortenPath(d.path, max(availPath2, 1))
+          let leftSide = " ".repeat(indent) & shortPath
+          let plainRight = folder & " ".repeat(gap) & alignedSize
+          let padding = termWidth - leftSide.len - plainRight.len
+          let rightColored = if useColor:
+            Dim & folder & Reset & " ".repeat(gap) & colorSize(alignedSize, entry.sizeBytes)
+          else: plainRight
+          if padding >= minGap:
+            echo leftSide & " ".repeat(padding) & rightColored
+          else:
+            echo leftSide & " ".repeat(minGap) & rightColored
+        else:
+          # Subsequent: right-aligned, no project name
+          let maxFolder = termWidth - rightFixedLen - indent
+          let folder = shortenFolder(entry.folder, maxFolder)
+          let plainRight = folder & " ".repeat(gap) & alignedSize
+          let rightColored = if useColor:
+            Dim & folder & Reset & " ".repeat(gap) & colorSize(alignedSize, entry.sizeBytes)
+          else: plainRight
+          let pad = termWidth - plainRight.len
+          if pad > 0:
+            echo " ".repeat(pad) & rightColored
+          else:
+            echo rightColored
+
+  # Summary
+  var totalBytes: int64 = 0
+  for p in projects: totalBytes += p.totalSize
+  let summary = "Total: " & $projects.len & " projects, " & fmtSize(totalBytes) & " reclaimable"
+  echo ""
+  if useColor:
+    echo Bold & summary & Reset
+  else:
+    echo summary
+
+proc printCountProgress*(count: int) =
+  let spinChars = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"]
+  let ch = spinChars[(count div 50) mod spinChars.len]
+  let line = "Scanning " & ch & " " & $count & " dirs"
+  let termWidth = try: terminalWidth() except: 80
+  let padded = if line.len < termWidth: line & " ".repeat(termWidth - line.len)
+               else: line[0 ..< termWidth]
+  stderr.write "\r" & padded
+  stderr.flushFile()
+
+proc clearProgress*() =
+  let termWidth = try: terminalWidth() except: 80
+  stderr.write "\r" & " ".repeat(termWidth) & "\r"
+  stderr.flushFile()
