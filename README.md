@@ -6,7 +6,7 @@ No more manually hunting down `target/`, `build/`, `node_modules/`, or `.gradle/
 
 ## ✨ Features
 
-- 🔍 **Auto-detection** — Recognizes 11 project types by reading their build files
+- 🔍 **Auto-detection** — Recognizes 25 project types by reading their build files
 - 📖 **Reads build scripts** — Doesn't just guess; actually parses `pom.xml`, `build.gradle`, `Cargo.toml`, `Makefile`, `package.json`, `.nimble`, and more
 - 🏗️ **Understands project structure** — Knows what's source (skip), what's output (clean), and what's unknown (explore)
 - 🌳 **Recursive with aggregation** — Traverses nested projects and rolls up results to the root project
@@ -19,20 +19,35 @@ No more manually hunting down `target/`, `build/`, `node_modules/`, or `.gradle/
 
 | Type | Detection | What it reads | Clean targets |
 |------|-----------|---------------|---------------|
-| 🦀 **Cargo** (Rust) | `Cargo.toml` | `target-dir`, `.cargo/config.toml` | `target/` |
-| 🐘 **Gradle** | `build.gradle(.kts)` | `buildDir`, `layout.buildDirectory` | `build/`, `.gradle/`* |
-| ☕ **Maven** | `pom.xml` | `<build><directory>`, `<sourceDirectory>` | `target/` |
-| 👑 **Nim** (Nimble) | `*.nimble` | `bin`, `srcDir` | Binary files, `nimcache/`, `nimbledeps/`* |
-| 🟢 **Node.js** | `package.json` | `dependencies` for framework detection | `.next/`, `.nuxt/`, `dist/`, `node_modules/`* |
-| 🐍 **Python** | `pyproject.toml`, `setup.py` | — | `__pycache__/`, `build/`, `*.egg-info/`, `.venv/`* |
-| 🔧 **CMake** | `CMakeLists.txt` | Scans for `CMakeCache.txt` in subdirs | Build directories, `cmake-build-*/` |
 | 🐜 **Ant** | `build.xml` | `<property name="build.dir">` | `build/`, `dist/` |
+| 🔶 **Bazel** | `MODULE.bazel`, `WORKSPACE` | — | `bazel-*/` |
+| 💎 **Bundler** (Ruby) | `Gemfile` + `Gemfile.lock` | — | `vendor/bundle/`*, `.bundle/`* |
+| 🦀 **Cargo** (Rust) | `Cargo.toml` | `target-dir`, `.cargo/config.toml` | `target/` |
+| 🔧 **CMake** | `CMakeLists.txt` | Scans for `CMakeCache.txt` in subdirs | Build directories, `cmake-build-*/` |
+| 🐘 **Composer** (PHP) | `composer.json` + `composer.lock` | — | `vendor/`* |
+| 🎯 **Dart** (Flutter) | `pubspec.yaml` | — | `.dart_tool/`, `build/` |
+| 🔷 **.NET** | `*.csproj`, `*.sln` | `OutputPath`, `BaseIntermediateOutputPath` | `bin/`, `obj/`, `packages/`* |
+| 💧 **Mix** (Elixir) | `mix.exs` | — | `_build/`, `deps/`* |
+| 🐹 **Go** | `go.mod` | — | `vendor/`* |
+| 🎮 **Godot** | `project.godot` | — | `.godot/`, `.import/` |
+| 🐘 **Gradle** | `build.gradle(.kts)` | `buildDir`, `layout.buildDirectory` | `build/`, `.gradle/`* |
+| 🟪 **Haskell** | `*.cabal`, `stack.yaml` | `work-dir` from `stack.yaml` | `.stack-work/`, `dist-newstyle/`, `dist/` |
+| 🌿 **Hugo** | `hugo.yaml/toml`, or `config.yaml/toml` + `content/` + `layouts/` | — | `public/`, `resources/_gen/` |
+| 🪶 **Jekyll** | `_config.yml` + `_posts/` | `destination` from `_config.yml` | `_site/`, `.jekyll-cache/`, `.sass-cache/` |
 | ⚙️ **Makefile** | `Makefile` with `clean:` target | Parses `rm -r` commands, resolves included variables | Whatever `clean:`/`distclean:` removes |
-| 🌿 **Hugo** | `config.yaml/toml` + `content/` | — | `public/`, `resources/_gen/` |
+| ☕ **Maven** | `pom.xml` | `<build><directory>`, `<sourceDirectory>` | `target/` |
+| 🔨 **Meson** | `meson.build` | Scans for `build.ninja` in subdirs | Build directories |
+| 👑 **Nimble** (Nim) | `*.nimble` | `bin`, `srcDir` | Binary files, `nimcache/`, `nimbledeps/`* |
+| 🟢 **Node.js** | `package.json` + lockfile or `node_modules/` | `dependencies` for framework detection | `.next/`, `.nuxt/`, `dist/`, `node_modules/`* |
+| 🐍 **Python** | `pyproject.toml`, `setup.py` | — | `__pycache__/`, `build/`, `*.egg-info/`, `.venv/`* |
+| 🪜 **sbt** (Scala) | `build.sbt` | — | `target/`, `project/target/`, `.bsp/`* |
+| 🍎 **SPM** (Swift) | `Package.swift` | — | `.build/` |
+| 🎮 **Unity** | `ProjectSettings/` + `Assets/` | — | `Library/`, `Temp/`, `Obj/`, `Logs/` |
+| ⚡ **Zig** | `build.zig` | — | `zig-cache/`, `.zig-cache/`, `zig-out/` |
 
 \* *Marked with `*` = only removed with `--purge` (distclean level)*
 
-> 💡 A project can be detected as **multiple types** simultaneously (e.g. Nim + Makefile, or Gradle + Maven). Each analyzer contributes its targets independently.
+> 💡 A project can be detected as **multiple types** simultaneously (e.g. Gradle + Maven, or Go + Node). Each analyzer contributes its targets independently; the project is displayed under the highest-priority type.
 
 ## 🚀 Quick Start
 
@@ -186,7 +201,7 @@ root = true
 
 Override or extend the detected project type. Space-separated for multiple types.
 
-Supported values: `gradle`, `maven`, `cargo`, `nim`, `node`, `python`, `cmake`, `ant`, `makefile`, `hugo`.
+Supported values: `ant`, `bazel`, `bundler`, `cargo`, `cmake`, `composer`, `dart`, `dotnet`, `elixir`, `go`, `godot`, `gradle`, `haskell`, `hugo`, `jekyll`, `makefile`, `maven`, `meson`, `nim`, `node`, `python`, `sbt`, `swift`, `unity`, `zig`.
 
 ```toml
 type = "gradle maven"

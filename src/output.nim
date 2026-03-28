@@ -30,10 +30,27 @@ proc colorSize(s: string, bytes: int64): string =
 proc kindColor*(kind: ProjectKind): string =
   Blue
 
+proc kindScore(kind: ProjectKind): int =
+  case kind
+  of pkMakefile: 1
+  of pkAnt: 10
+  of pkMaven: 20
+  of pkCMake: 25
+  of pkMeson: 26
+  of pkSbt: 30
+  of pkGradle: 35
+  of pkNode: 40
+  of pkDotnet: 45
+  else: 50
+
 proc primaryKind*(kinds: set[ProjectKind]): ProjectKind =
-  for k in ProjectKind:
-    if k in kinds: return k
-  return pkMakefile
+  result = pkMakefile
+  var best = -1
+  for k in kinds:
+    let s = kindScore(k)
+    if s > best:
+      best = s
+      result = k
 
 
 proc shortenPath*(path: string, maxLen: int): string =

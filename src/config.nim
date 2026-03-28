@@ -15,7 +15,9 @@ const
 # root = false
 
 # Override/extend detected types (space-separated)
-# Supported: gradle, maven, cargo, nim, node, python, cmake, ant, makefile, hugo
+# Supported: ant, bazel, bundler, cargo, cmake, composer, dart, dotnet, elixir,
+#            go, godot, gradle, haskell, hugo, jekyll, makefile, maven, meson,
+#            nim, node, python, sbt, swift, unity, zig
 # type = "gradle maven"
 
 # Additional targets to clean, relative to this directory (local only)

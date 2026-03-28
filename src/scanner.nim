@@ -15,30 +15,74 @@ proc detectProjectKinds*(dir: string): set[ProjectKind] =
     of "Cargo.toml":    result.incl pkCargo
     of "build.gradle.kts", "build.gradle": result.incl pkGradle
     of "pom.xml":       result.incl pkMaven
-    of "package.json":  result.incl pkNode
+    of "package.json":  discard  # detected below with lockfile check
     of "pyproject.toml", "setup.py": result.incl pkPython
     of "CMakeLists.txt": result.incl pkCMake
     of "build.xml":     result.incl pkAnt
     of "Makefile":      hasMakefile = true
+    of "go.mod":        result.incl pkGo
+    of "pubspec.yaml":  result.incl pkDart
+    of "build.sbt":     result.incl pkSbt
+    of "Package.swift": result.incl pkSwift
+    of "build.zig":     result.incl pkZig
+    of "mix.exs":       result.incl pkElixir
+    of "meson.build":   result.incl pkMeson
+    of "project.godot": result.incl pkGodot
+    of "MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel": result.incl pkBazel
     else:
       if name.endsWith(".nimble"): result.incl pkNim
       elif name.endsWith(".nim"): hasNimSrc = true
+      elif name.endsWith(".csproj") or name.endsWith(".sln"): result.incl pkDotnet
+      elif name.endsWith(".cabal"): result.incl pkHaskell
+      elif name.endsWith(".uproject"): discard  # Unreal, not supported
 
   if pkNim notin result and hasMakefile and hasNimSrc:
     result.incl pkNim
 
-  if hasMakefile and pkNim notin result and pkCMake notin result:
+  # Makefile: only if no other type was detected (many projects have Makefiles as wrappers)
+  if hasMakefile and result == {}:
     try:
       let content = readFile(dir / "Makefile")
       if "\nclean:" in content or content.startsWith("clean:"):
         result.incl pkMakefile
     except: discard
 
-  # Hugo: config.yaml/config.toml + content/ directory
-  if dirExists(dir / "content") and
-     (fileExists(dir / "config.yaml") or fileExists(dir / "config.toml") or
-      fileExists(dir / "hugo.yaml") or fileExists(dir / "hugo.toml")):
+  # Hugo: require hugo-specific config file names to avoid false positives
+  # on generic config.yaml + content/ combinations
+  if fileExists(dir / "hugo.yaml") or fileExists(dir / "hugo.toml"):
     result.incl pkHugo
+  elif dirExists(dir / "content") and dirExists(dir / "layouts") and
+       (fileExists(dir / "config.yaml") or fileExists(dir / "config.toml")):
+    result.incl pkHugo
+
+  # Unity: ProjectSettings/ directory is the reliable indicator
+  if dirExists(dir / "ProjectSettings") and dirExists(dir / "Assets"):
+    result.incl pkUnity
+
+  # Jekyll: _config.yml + _posts/
+  if dirExists(dir / "_posts") and
+     (fileExists(dir / "_config.yml") or fileExists(dir / "_config.yaml")):
+    result.incl pkJekyll
+
+  # Haskell: stack.yaml (cabal files detected in the case block above)
+  if fileExists(dir / "stack.yaml"):
+    result.incl pkHaskell
+
+  # Bundler: Gemfile + Gemfile.lock
+  if fileExists(dir / "Gemfile") and fileExists(dir / "Gemfile.lock"):
+    result.incl pkBundler
+
+  # Composer: composer.json + composer.lock
+  if fileExists(dir / "composer.json") and fileExists(dir / "composer.lock"):
+    result.incl pkComposer
+
+  # Node: package.json + evidence of real npm/yarn/pnpm usage
+  if fileExists(dir / "package.json") and
+     (fileExists(dir / "package-lock.json") or
+      fileExists(dir / "yarn.lock") or
+      fileExists(dir / "pnpm-lock.yaml") or
+      dirExists(dir / "node_modules")):
+    result.incl pkNode
 
 proc getDirSize*(path: string): int64 =
   try:
