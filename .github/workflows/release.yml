@@ -1,0 +1,137 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker containers with dependencies
+        run: make docker
+
+      - name: Build all platforms
+        run: make all
+
+      - name: Package Windows binaries
+        run: |
+          cd target
+          zip swoop-windows-x86_64.zip swoop.64.exe
+          zip swoop-windows-i686.zip swoop.32.exe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: target/swoop*
+
+  sign-macos:
+    needs: build
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_NOTARY_KEY_JSON: ${{ secrets.APPLE_NOTARY_KEY_JSON }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: target
+
+      - name: Sign and notarize macOS binaries
+        run: |
+          set -euo pipefail
+
+          # Import certificate into temporary keychain
+          KEYCHAIN_PWD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PWD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PWD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" build.keychain
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | awk '{print $2}')
+          rm certificate.p12
+
+          # Parse notary credentials
+          APPLE_API_ISSUER=$(echo "$APPLE_NOTARY_KEY_JSON" | grep -o '"issuer_id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+          APPLE_API_KEY_ID=$(echo "$APPLE_NOTARY_KEY_JSON" | grep -o '"key_id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+          APPLE_API_KEY=$(echo "$APPLE_NOTARY_KEY_JSON" | grep -o '"private_key"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+          mkdir -p ~/private_keys
+          echo "-----BEGIN PRIVATE KEY-----" > ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+          echo "$APPLE_API_KEY" >> ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+          echo "-----END PRIVATE KEY-----" >> ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+
+          # Sign and notarize each macOS binary
+          for bin in target/swoop.macintel target/swoop.macarm; do
+            [ -f "$bin" ] || continue
+            chmod +x "$bin"
+            codesign --force --sign "$IDENTITY" --timestamp --options runtime "$bin"
+            codesign --verify --strict --verbose=2 "$bin"
+
+            # Notarize (must zip for notarytool)
+            ZIP_PATH="${bin}.zip"
+            zip -j "$ZIP_PATH" "$bin"
+            xcrun notarytool submit "$ZIP_PATH" \
+              --key ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              --wait
+            rm "$ZIP_PATH"
+          done
+
+          # Create signed universal binary
+          lipo -create target/swoop.macintel target/swoop.macarm -output target/swoop.mac
+          codesign --force --sign "$IDENTITY" --timestamp --options runtime target/swoop.mac
+
+          rm -rf ~/private_keys
+
+      - name: Upload signed macOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-signed
+          path: |
+            target/swoop.mac
+            target/swoop.macintel
+            target/swoop.macarm
+
+  release:
+    needs: [build, sign-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          # Linux & ARM
+          cp artifacts/binaries/swoop.linux release/
+          cp artifacts/binaries/swoop.32.linux release/
+          cp artifacts/binaries/swoop.aarch64.linux release/
+          cp artifacts/binaries/swoop.arm.linux release/
+          # Windows zips
+          cp artifacts/binaries/swoop-windows-x86_64.zip release/
+          cp artifacts/binaries/swoop-windows-i686.zip release/
+          # Signed macOS
+          cp artifacts/macos-signed/swoop.mac release/
+          cp artifacts/macos-signed/swoop.macintel release/
+          cp artifacts/macos-signed/swoop.macarm release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*

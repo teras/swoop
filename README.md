@@ -49,12 +49,15 @@ No more manually hunting down `target/`, `build/`, `node_modules/`, or `.gradle/
 
 > 💡 A project can be detected as **multiple types** simultaneously (e.g. Gradle + Maven, or Go + Node). Each analyzer contributes its targets independently; the project is displayed under the highest-priority type.
 
+## 📥 Installation
+
+Download the latest binary for your platform from the [Releases](https://github.com/teras/swoop/releases) page. No dependencies required.
+
+Available binaries: Linux (x86_64, i386, ARM, ARM64), macOS (Intel, ARM, Universal), Windows (32-bit, 64-bit).
+
 ## 🚀 Quick Start
 
 ```bash
-# Build
-nimble build
-
 # Scan current directory (dry-run, safe)
 swoop
 
