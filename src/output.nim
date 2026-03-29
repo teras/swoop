@@ -33,7 +33,8 @@ proc kindColor*(kind: ProjectKind): string =
 
 proc kindScore(kind: ProjectKind): int =
   case kind
-  of pkMakefile: 1
+  of pkFlatpak: 1
+  of pkMakefile: 5
   of pkAnt: 10
   of pkMaven: 20
   of pkCMake: 25

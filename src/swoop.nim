@@ -15,6 +15,7 @@ proc main() =
     numThreads = 0
     maxDepth = 0
     filterType: set[ProjectKind] = {}
+    filterEmpty = false
     paths: seq[string]
 
   var i = 1
@@ -54,9 +55,18 @@ proc main() =
     of "--type":
       inc i
       if i <= paramCount():
-        for kind in ProjectKind:
-          if $kind == paramStr(i):
-            filterType.incl kind
+        if paramStr(i) == "empty":
+          filterEmpty = true
+          prune = true
+        else:
+          var found = false
+          for kind in ProjectKind:
+            if $kind == paramStr(i):
+              filterType.incl kind
+              found = true
+          if not found:
+            stderr.writeLine "Unknown project type: " & paramStr(i)
+            quit(1)
     of "-h", "--help":
       echo """swoop - Smart Build Artifact Cleaner
 
@@ -122,8 +132,8 @@ Options:
   if prune:
     var excludePaths: seq[string]
     for p in scanResult.projects:
-      for e in p.entries:
-        excludePaths.add e.path
+      for d in p.artifactDirs:
+        excludePaths.add d
 
     emptyDirs = findEmptyDirs(paths, excludePaths, DefaultGlobalSkip)
     for emptyDir in emptyDirs:
@@ -138,15 +148,31 @@ Options:
       if not assigned:
         orphanEmpty.add emptyDir
 
-  printResults(scanResult.projects, paths[0], execute, noColor,
-               if prune: orphanEmpty else: @[])
+  if filterEmpty:
+    printResults(@[], paths[0], execute, noColor, orphanEmpty)
+  else:
+    printResults(scanResult.projects, paths[0], execute, noColor,
+                 if prune: orphanEmpty else: @[])
 
   if scanResult.errors.len > 0 and verbose:
     echo "Errors:"
     for e in scanResult.errors:
       echo "  " & e
 
-  if not dryRun and scanResult.projects.len > 0:
+  if filterEmpty:
+    # Only clean empty dirs
+    if not dryRun and (orphanEmpty.len > 0 or emptyDirs.len > 0):
+      if not force and not quiet:
+        stderr.write "Delete " & $emptyDirs.len & " empty directories? [y/N] "
+        stderr.flushFile()
+        let answer = stdin.readLine().strip().toLowerAscii()
+        if answer != "y" and answer != "yes":
+          echo "Aborted."
+          quit(0)
+      pruneEmptyDirs(emptyDirs, verbose = verbose)
+      if not quiet:
+        echo "Pruned " & $emptyDirs.len & " empty directories"
+  elif not dryRun and scanResult.projects.len > 0:
     var totalBytes: int64 = 0
     for p in scanResult.projects: totalBytes += p.totalSize
     if not force and not quiet:

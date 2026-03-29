@@ -1,6 +1,6 @@
 import ../types
 import ant, bazel, bundler, cargo, cmake, composer, dart, dotnet
-import elixir, go_proj, godot, gradle, haskell, hugo, jekyll, makefile
+import elixir, flatpak, go_proj, godot, gradle, haskell, hugo, jekyll, makefile
 import maven, meson, nim_proj, node, python, sbt, swift, unity, zig_proj
 
 proc analyze*(dir: string, kind: ProjectKind): AnalyzeResult =
@@ -14,6 +14,7 @@ proc analyze*(dir: string, kind: ProjectKind): AnalyzeResult =
   of pkDart: analyzeDart(dir)
   of pkDotnet: analyzeDotnet(dir)
   of pkElixir: analyzeElixir(dir)
+  of pkFlatpak: analyzeFlatpak(dir)
   of pkGo: analyzeGo(dir)
   of pkGodot: analyzeGodot(dir)
   of pkGradle: analyzeGradle(dir)

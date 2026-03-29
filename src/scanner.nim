@@ -63,6 +63,10 @@ proc detectProjectKinds*(dir: string): set[ProjectKind] =
   if fileExists(dir / "stack.yaml"):
     result.incl pkHaskell
 
+  # Flatpak: .flatpak-builder/ directory
+  if dirExists(dir / ".flatpak-builder"):
+    result.incl pkFlatpak
+
   # Bundler: Gemfile + Gemfile.lock
   if fileExists(dir / "Gemfile") and fileExists(dir / "Gemfile.lock"):
     result.incl pkBundler
@@ -233,6 +237,13 @@ proc scanProjects*(rootPaths: seq[string],
           except OSError:
             discard
 
+      # All artifact paths (clean + distclean) as full paths for prune exclusion
+      var artifactDirs: seq[string]
+      for d in allCleanDirs & allDistcleanTargets:
+        let fullPath = dir / d
+        if dirExists(fullPath):
+          artifactDirs.add fullPath
+
       let isNewRoot = currentRoot.len == 0 or localCfg.root
       let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
       var positiveDirs = if noSkip: initHashSet[string]()
@@ -246,6 +257,7 @@ proc scanProjects*(rootPaths: seq[string],
           path: dir,
           kinds: kinds,
           entries: entries,
+          artifactDirs: artifactDirs,
           totalSize: 0,
           hasLocalConfig: localCfg.typeOverride.len > 0 or
                           localCfg.extraClean.len > 0 or
@@ -269,6 +281,8 @@ proc scanProjects*(rootPaths: seq[string],
           if projectMap[i].path == currentRoot:
             for e in entries:
               projectMap[i].entries.add e
+            for d in artifactDirs:
+              projectMap[i].artifactDirs.add d
             break
 
         try:

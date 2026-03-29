@@ -9,6 +9,7 @@ type
     pkDart = "dart"
     pkDotnet = "dotnet"
     pkElixir = "elixir"
+    pkFlatpak = "flatpak"
     pkGo = "go"
     pkGodot = "godot"
     pkGradle = "gradle"
@@ -44,6 +45,7 @@ type
     path*: string
     kinds*: set[ProjectKind]
     entries*: seq[CleanEntry]
+    artifactDirs*: seq[string]  ## all known artifact paths (clean+distclean) for prune exclusion
     totalSize*: int64
     hasLocalConfig*: bool
     isRoot*: bool

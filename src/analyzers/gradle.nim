@@ -26,6 +26,7 @@ proc analyzeGradle*(dir: string): AnalyzeResult =
     result.cleanTargets.add "build"
 
   result.distcleanTargets.add ".gradle"
+  result.distcleanTargets.add ".kotlin"
 
   result.skipDirs.add "src"
   result.skipDirs.add "gradle"

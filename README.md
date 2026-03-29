@@ -6,7 +6,7 @@ No more manually hunting down `target/`, `build/`, `node_modules/`, or `.gradle/
 
 ## ✨ Features
 
-- 🔍 **Auto-detection** — Recognizes 25 project types by reading their build files
+- 🔍 **Auto-detection** — Recognizes 26 project types by reading their build files
 - 📖 **Reads build scripts** — Doesn't just guess; actually parses `pom.xml`, `build.gradle`, `Cargo.toml`, `Makefile`, `package.json`, `.nimble`, and more
 - 🏗️ **Understands project structure** — Knows what's source (skip), what's output (clean), and what's unknown (explore)
 - 🌳 **Recursive with aggregation** — Traverses nested projects and rolls up results to the root project
@@ -27,10 +27,11 @@ No more manually hunting down `target/`, `build/`, `node_modules/`, or `.gradle/
 | 🐘 **Composer** (PHP) | `composer.json` + `composer.lock` | — | `vendor/`* |
 | 🎯 **Dart** (Flutter) | `pubspec.yaml` | — | `.dart_tool/`, `build/` |
 | 🔷 **.NET** | `*.csproj`, `*.sln` | `OutputPath`, `BaseIntermediateOutputPath` | `bin/`, `obj/`, `packages/`* |
+| 📦 **Flatpak** | `.flatpak-builder/` | — | `build-dir/`, `.flatpak-builder/`* |
 | 💧 **Mix** (Elixir) | `mix.exs` | — | `_build/`, `deps/`* |
 | 🐹 **Go** | `go.mod` | — | `vendor/`* |
 | 🎮 **Godot** | `project.godot` | — | `.godot/`, `.import/` |
-| 🐘 **Gradle** | `build.gradle(.kts)` | `buildDir`, `layout.buildDirectory` | `build/`, `.gradle/`* |
+| 🐘 **Gradle** | `build.gradle(.kts)` | `buildDir`, `layout.buildDirectory` | `build/`, `.gradle/`*, `.kotlin/`* |
 | 🟪 **Haskell** | `*.cabal`, `stack.yaml` | `work-dir` from `stack.yaml` | `.stack-work/`, `dist-newstyle/`, `dist/` |
 | 🌿 **Hugo** | `hugo.yaml/toml`, or `config.yaml/toml` + `content/` + `layouts/` | — | `public/`, `resources/_gen/` |
 | 🪶 **Jekyll** | `_config.yml` + `_posts/` | `destination` from `_config.yml` | `_site/`, `.jekyll-cache/`, `.sass-cache/` |
@@ -206,7 +207,7 @@ root = true
 
 Override or extend the detected project type. Space-separated for multiple types.
 
-Supported values: `ant`, `bazel`, `bundler`, `cargo`, `cmake`, `composer`, `dart`, `dotnet`, `elixir`, `go`, `godot`, `gradle`, `haskell`, `hugo`, `jekyll`, `makefile`, `maven`, `meson`, `nim`, `node`, `python`, `sbt`, `swift`, `unity`, `zig`.
+Supported values: `ant`, `bazel`, `bundler`, `cargo`, `cmake`, `composer`, `dart`, `dotnet`, `elixir`, `flatpak`, `go`, `godot`, `gradle`, `haskell`, `hugo`, `jekyll`, `makefile`, `maven`, `meson`, `nim`, `node`, `python`, `sbt`, `swift`, `unity`, `zig`.
 
 ```toml
 type = "gradle maven"
