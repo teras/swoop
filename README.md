@@ -45,7 +45,7 @@ No more manually hunting down `target/`, `build/`, `node_modules/`, or `.gradle/
 | 🎮 **Unity** | `ProjectSettings/` + `Assets/` | — | `Library/`, `Temp/`, `Obj/`, `Logs/` |
 | ⚡ **Zig** | `build.zig` | — | `zig-cache/`, `.zig-cache/`, `zig-out/` |
 
-\* *Marked with `*` = only removed with `--purge` (distclean level)*
+\* *Marked with `*` = only removed with `--all` (distclean level)*
 
 > 💡 A project can be detected as **multiple types** simultaneously (e.g. Gradle + Maven, or Go + Node). Each analyzer contributes its targets independently; the project is displayed under the highest-priority type.
 
@@ -67,8 +67,8 @@ swoop ~/Projects
 # Actually delete (with confirmation)
 swoop -x ~/Projects
 
-# Deep clean (also remove node_modules, .venv, .gradle, etc.)
-swoop --purge ~/Projects
+# Also remove deps/caches (node_modules, .venv, .gradle, etc.)
+swoop --all ~/Projects
 
 # Delete without confirmation
 swoop -x -f ~/Projects
@@ -124,7 +124,7 @@ This is driven by each analyzer reading the actual build files, not hardcoded li
 | Level | Flag | What it removes |
 |-------|------|-----------------|
 | **clean** | *(default)* | Build output only |
-| **distclean** | `--purge` | + dependencies, caches, virtual environments |
+| **distclean** | `--all` | + dependencies, caches, virtual environments |
 
 ### Root project aggregation
 
@@ -137,7 +137,9 @@ swoop [options] [path...]
 
   -x, --execute       Actually delete (without this = dry-run)
   -f, --force         Don't ask for confirmation (with -x)
-  --purge              Distclean level (node_modules, .venv, .gradle, etc.)
+  --all               Also remove deps/caches/envs (node_modules, .venv, etc.)
+  --prune             Remove empty directories bottom-up after cleaning
+  --no-skip           Descend into source directories (override positive matches)
   -v, --verbose       Verbose output (show errors)
   -q, --quiet         Suppress progress output
   -t, --threads N     Worker threads (default: auto = CPU count)

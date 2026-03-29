@@ -4,7 +4,9 @@ import types, config, scanner, output, cleaner
 proc main() =
   var
     execute = false
-    purge = false
+    all = false
+    prune = false
+    noSkip = false
     verbose = false
     quiet = false
     noColor = false
@@ -21,8 +23,12 @@ proc main() =
     case arg
     of "-x", "--execute":
       execute = true
-    of "--purge":
-      purge = true
+    of "--all":
+      all = true
+    of "--prune":
+      prune = true
+    of "--no-skip":
+      noSkip = true
     of "-v", "--verbose":
       verbose = true
     of "-q", "--quiet":
@@ -62,8 +68,9 @@ Arguments:
 Options:
   -x, --execute     Actually delete (without this = dry-run)
   -f, --force       Don't ask for confirmation (with -x)
-  --purge           Distclean level: also remove deps/caches/envs
-                    (node_modules, .venv, .gradle, etc.)
+  --all             Also remove deps/caches/envs (node_modules, .venv, etc.)
+  --prune           Remove empty directories bottom-up after cleaning
+  --no-skip         Descend into source directories (override positive matches)
   -v, --verbose     Verbose output
   -q, --quiet       Only errors
   -t, --threads N   Worker threads (default: auto)
@@ -92,7 +99,7 @@ Options:
     else:
       quit(1)
 
-  let level = if purge: clDistclean else: clClean
+  let level = if all: clDistclean else: clClean
   let dryRun = not execute
 
   var scanResult = scanProjects(
@@ -100,6 +107,7 @@ Options:
     level = level,
     maxDepth = maxDepth,
     threads = numThreads,
+    noSkip = noSkip,
     onProgress = if not quiet: printCountProgress else: nil,
   )
 
@@ -127,7 +135,11 @@ Options:
         echo "Aborted."
         quit(0)
     let (cleaned, freed) = cleanAll(scanResult.projects, dryRun = false, verbose = verbose)
-    if not quiet:
+    if prune:
+      let pruned = pruneEmptyDirs(paths, dryRun = false, verbose = verbose)
+      if not quiet:
+        echo "Cleaned " & $cleaned & " targets, freed " & fmtSize(freed) & ", pruned " & $pruned & " empty dirs"
+    elif not quiet:
       echo "Cleaned " & $cleaned & " targets, freed " & fmtSize(freed)
 
 when isMainModule:

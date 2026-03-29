@@ -1,4 +1,4 @@
-import std/[os]
+import std/[os, algorithm]
 import types
 
 proc deleteEntry*(entry: CleanEntry, dryRun: bool): bool =
@@ -31,3 +31,30 @@ proc cleanAll*(projects: seq[ProjectInfo], dryRun: bool, verbose: bool): tuple[c
     let (c, f) = cleanProject(p, dryRun, verbose)
     result.cleaned += c
     result.freed += f
+
+proc pruneEmptyDirs*(rootPaths: seq[string], dryRun: bool, verbose: bool): int =
+  ## Remove empty directories bottom-up. Returns count of removed dirs.
+  for rootPath in rootPaths:
+    # Collect all directories depth-first
+    var dirs: seq[string]
+    try:
+      for path in walkDirRec(rootPath, yieldFilter = {pcDir}):
+        dirs.add path
+    except OSError:
+      discard
+    # Sort by length descending (deepest first)
+    dirs.sort(proc(a, b: string): int = cmp(b.len, a.len))
+    for dir in dirs:
+      try:
+        var isEmpty = true
+        for entry in walkDir(dir):
+          isEmpty = false
+          break
+        if isEmpty:
+          if not dryRun:
+            removeDir(dir)
+          if verbose:
+            stderr.writeLine "Pruned: " & dir
+          inc result
+      except OSError:
+        discard

@@ -164,6 +164,7 @@ proc scanProjects*(rootPaths: seq[string],
                    level: CleanLevel = clClean,
                    maxDepth: int = 0,
                    threads: int = 0,
+                   noSkip: bool = false,
                    onProgress: proc(count: int) = nil): ScanResult =
   let defaultSkip = DefaultGlobalSkip.toHashSet
   let effectiveDepth = maxDepth
@@ -253,7 +254,8 @@ proc scanProjects*(rootPaths: seq[string],
           let newRoot = dir
 
           let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
-          var positiveDirs = merged.skipDirs.toHashSet
+          var positiveDirs = if noSkip: initHashSet[string]()
+                             else: merged.skipDirs.toHashSet
           # traverse_scan overrides analyzer skipDirs too
           for t in localCfg.traverseScan: positiveDirs.excl t
           let skipHere = resolveSkipSet(localCfg, inheritedSkip)
@@ -279,7 +281,8 @@ proc scanProjects*(rootPaths: seq[string],
               break
 
           let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
-          var positiveDirs = merged.skipDirs.toHashSet
+          var positiveDirs = if noSkip: initHashSet[string]()
+                             else: merged.skipDirs.toHashSet
           # traverse_scan overrides analyzer skipDirs too
           for t in localCfg.traverseScan: positiveDirs.excl t
           let skipHere = resolveSkipSet(localCfg, inheritedSkip)
