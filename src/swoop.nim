@@ -117,7 +117,29 @@ Options:
   if not quiet:
     clearProgress()
 
-  printResults(scanResult.projects, paths[0], execute, noColor)
+  var emptyDirs: seq[string]
+  var orphanEmpty: seq[string]
+  if prune:
+    var excludePaths: seq[string]
+    for p in scanResult.projects:
+      for e in p.entries:
+        excludePaths.add e.path
+
+    emptyDirs = findEmptyDirs(paths, excludePaths, DefaultGlobalSkip)
+    for emptyDir in emptyDirs:
+      # Assign to nearest project
+      var assigned = false
+      for pi in 0 ..< scanResult.projects.len:
+        if emptyDir.startsWith(scanResult.projects[pi].path & "/"):
+          scanResult.projects[pi].entries.add CleanEntry(
+            path: emptyDir, size: 0, isDir: true)
+          assigned = true
+          break
+      if not assigned:
+        orphanEmpty.add emptyDir
+
+  printResults(scanResult.projects, paths[0], execute, noColor,
+               if prune: orphanEmpty else: @[])
 
   if scanResult.errors.len > 0 and verbose:
     echo "Errors:"
@@ -128,19 +150,17 @@ Options:
     var totalBytes: int64 = 0
     for p in scanResult.projects: totalBytes += p.totalSize
     if not force and not quiet:
-      stderr.write "Delete " & fmtSize(totalBytes) & "? [y/N] "
+      stderr.write "Delete " & fmtSize(totalBytes, pad = false) & "? [y/N] "
       stderr.flushFile()
       let answer = stdin.readLine().strip().toLowerAscii()
       if answer != "y" and answer != "yes":
         echo "Aborted."
         quit(0)
     let (cleaned, freed) = cleanAll(scanResult.projects, dryRun = false, verbose = verbose)
-    if prune:
-      let pruned = pruneEmptyDirs(paths, dryRun = false, verbose = verbose)
-      if not quiet:
-        echo "Cleaned " & $cleaned & " targets, freed " & fmtSize(freed) & ", pruned " & $pruned & " empty dirs"
-    elif not quiet:
-      echo "Cleaned " & $cleaned & " targets, freed " & fmtSize(freed)
+    if prune and orphanEmpty.len > 0:
+      pruneEmptyDirs(orphanEmpty, verbose = verbose)
+    if not quiet:
+      echo "Cleaned " & $cleaned & " targets, freed " & fmtSize(freed, pad = false)
 
 when isMainModule:
   main()

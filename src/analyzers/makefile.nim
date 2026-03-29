@@ -2,10 +2,34 @@ import std/[os, strutils]
 import regex
 import ../types
 
+proc sanitizeUtf8(s: string): string =
+  result = newStringOfCap(s.len)
+  var i = 0
+  while i < s.len:
+    let c = s[i].uint8
+    if c < 0x80:
+      result.add s[i]; inc i
+    elif c < 0xC0:
+      result.add '?'; inc i
+    elif c < 0xE0:
+      if i + 1 < s.len and (s[i+1].uint8 and 0xC0) == 0x80:
+        result.add s[i]; result.add s[i+1]; i += 2
+      else: result.add '?'; inc i
+    elif c < 0xF0:
+      if i + 2 < s.len and (s[i+1].uint8 and 0xC0) == 0x80 and (s[i+2].uint8 and 0xC0) == 0x80:
+        result.add s[i]; result.add s[i+1]; result.add s[i+2]; i += 3
+      else: result.add '?'; inc i
+    elif c < 0xF8:
+      if i + 3 < s.len and (s[i+1].uint8 and 0xC0) == 0x80 and (s[i+2].uint8 and 0xC0) == 0x80 and (s[i+3].uint8 and 0xC0) == 0x80:
+        result.add s[i]; result.add s[i+1]; result.add s[i+2]; result.add s[i+3]; i += 4
+      else: result.add '?'; inc i
+    else:
+      result.add '?'; inc i
+
 proc parseIncludeVars(dir: string, makefile: string): seq[tuple[key, value: string]] =
   ## Parse variables from included files (e.g. config.mk).
   try:
-    let content = readFile(dir / makefile)
+    let content = sanitizeUtf8(readFile(dir / makefile))
     for line in content.splitLines():
       var m: RegexMatch2
       if line.find(re2"^-?include\s+(\S+)", m):
@@ -26,7 +50,7 @@ proc parseMakefileTarget(dir: string, target: string,
   if not fileExists(path):
     return
   try:
-    let content = readFile(path)
+    let content = sanitizeUtf8(readFile(path))
     var inTarget = false
     for line in content.splitLines():
       if line.startsWith(target & ":"):

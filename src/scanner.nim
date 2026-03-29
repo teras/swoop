@@ -5,7 +5,6 @@ import analyzers/base
 
 proc detectProjectKinds*(dir: string): set[ProjectKind] =
   var hasMakefile = false
-  var hasNimSrc = false
 
   for (kind, path) in walkDir(dir):
     if kind != pcFile and kind != pcLinkToFile:
@@ -31,13 +30,9 @@ proc detectProjectKinds*(dir: string): set[ProjectKind] =
     of "MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel": result.incl pkBazel
     else:
       if name.endsWith(".nimble"): result.incl pkNim
-      elif name.endsWith(".nim"): hasNimSrc = true
       elif name.endsWith(".csproj") or name.endsWith(".sln"): result.incl pkDotnet
       elif name.endsWith(".cabal"): result.incl pkHaskell
       elif name.endsWith(".uproject"): discard  # Unreal, not supported
-
-  if pkNim notin result and hasMakefile and hasNimSrc:
-    result.incl pkNim
 
   # Makefile: only if no other type was detected (many projects have Makefiles as wrappers)
   if hasMakefile and result == {}:
@@ -238,67 +233,55 @@ proc scanProjects*(rootPaths: seq[string],
           except OSError:
             discard
 
-        let isNewRoot = currentRoot.len == 0 or localCfg.root
+      let isNewRoot = currentRoot.len == 0 or localCfg.root
+      let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
+      var positiveDirs = if noSkip: initHashSet[string]()
+                         else: merged.skipDirs.toHashSet
+      for t in localCfg.traverseScan: positiveDirs.excl t
+      let skipHere = resolveSkipSet(localCfg, inheritedSkip)
+      let localDepth = if localCfg.maxDepth > 0: localCfg.maxDepth else: effectiveDepth
 
-        if isNewRoot:
-          projectMap.add ProjectInfo(
-            path: dir,
-            kinds: kinds,
-            entries: entries,
-            totalSize: 0,
-            hasLocalConfig: localCfg.typeOverride.len > 0 or
-                            localCfg.extraClean.len > 0 or
-                            localCfg.keep.len > 0,
-            isRoot: true,
-          )
-          let newRoot = dir
+      if isNewRoot:
+        projectMap.add ProjectInfo(
+          path: dir,
+          kinds: kinds,
+          entries: entries,
+          totalSize: 0,
+          hasLocalConfig: localCfg.typeOverride.len > 0 or
+                          localCfg.extraClean.len > 0 or
+                          localCfg.keep.len > 0,
+          isRoot: true,
+        )
+        try:
+          for (kind, path) in walkDir(dir):
+            if kind != pcDir: continue
+            let name = path.extractFilename
+            if name in skipHere: continue
+            if name in negativeDirs: continue
+            if name in positiveDirs: continue
+            if localDepth > 0 and 1 > localDepth: continue
+            stack.add (path, 1, dir, skipHere)
+        except OSError:
+          result.errors.add "Cannot read: " & dir
 
-          let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
-          var positiveDirs = if noSkip: initHashSet[string]()
-                             else: merged.skipDirs.toHashSet
-          # traverse_scan overrides analyzer skipDirs too
-          for t in localCfg.traverseScan: positiveDirs.excl t
-          let skipHere = resolveSkipSet(localCfg, inheritedSkip)
-          let localDepth = if localCfg.maxDepth > 0: localCfg.maxDepth else: effectiveDepth
+      else:
+        for i in countdown(projectMap.len - 1, 0):
+          if projectMap[i].path == currentRoot:
+            for e in entries:
+              projectMap[i].entries.add e
+            break
 
-          try:
-            for (kind, path) in walkDir(dir):
-              if kind != pcDir: continue
-              let name = path.extractFilename
-              if name in skipHere: continue
-              if name in negativeDirs: continue
-              if name in positiveDirs: continue
-              if localDepth > 0 and 1 > localDepth: continue
-              stack.add (path, 1, newRoot, skipHere)
-          except OSError:
-            result.errors.add "Cannot read: " & dir
-
-        else:
-          for i in countdown(projectMap.len - 1, 0):
-            if projectMap[i].path == currentRoot:
-              for e in entries:
-                projectMap[i].entries.add e
-              break
-
-          let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
-          var positiveDirs = if noSkip: initHashSet[string]()
-                             else: merged.skipDirs.toHashSet
-          # traverse_scan overrides analyzer skipDirs too
-          for t in localCfg.traverseScan: positiveDirs.excl t
-          let skipHere = resolveSkipSet(localCfg, inheritedSkip)
-          let localDepth = if localCfg.maxDepth > 0: localCfg.maxDepth else: effectiveDepth
-
-          try:
-            for (kind, path) in walkDir(dir):
-              if kind != pcDir: continue
-              let name = path.extractFilename
-              if name in skipHere: continue
-              if name in negativeDirs: continue
-              if name in positiveDirs: continue
-              if localDepth > 0 and 1 > localDepth: continue
-              stack.add (path, 1, currentRoot, skipHere)
-          except OSError:
-            result.errors.add "Cannot read: " & dir
+        try:
+          for (kind, path) in walkDir(dir):
+            if kind != pcDir: continue
+            let name = path.extractFilename
+            if name in skipHere: continue
+            if name in negativeDirs: continue
+            if name in positiveDirs: continue
+            if localDepth > 0 and 1 > localDepth: continue
+            stack.add (path, 1, currentRoot, skipHere)
+        except OSError:
+          result.errors.add "Cannot read: " & dir
 
     else:
       if effectiveDepth > 0 and depth + 1 > effectiveDepth:
@@ -313,9 +296,6 @@ proc scanProjects*(rootPaths: seq[string],
         result.errors.add "Cannot read: " & dir
 
   discard scanned
-
-  # Filter empty projects
-  projectMap = projectMap.filterIt(it.entries.len > 0)
 
   # Phase 2: Compute sizes in parallel
   let numThreads = if threads > 0: threads else: countProcessors()

@@ -9,12 +9,13 @@ const
   Green = "\e[32m"
   Yellow = "\e[33m"
   Blue = "\e[34m"
-  Cyan = "\e[36m"
+  LineCh = when defined(windows): "-" else: "\u2500"
 
-proc fmtSize*(bytes: int64): string =
+proc fmtSize*(bytes: int64, pad: bool = true): string =
   if bytes < 0: return "—"
+  let sp = if pad: "  " else: " "
   if bytes < 1024:
-    return $bytes & "  B"
+    return $bytes & sp & "B"
   elif bytes < 1024 * 1024:
     return formatFloat(bytes.float / 1024.0, ffDecimal, 1) & " KB"
   elif bytes < 1024 * 1024 * 1024:
@@ -103,7 +104,7 @@ type
     entries: seq[EntryLine]
     totalSize: int64
 
-proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, noColor: bool = false) =
+proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, noColor: bool = false, emptyDirs: seq[string] = @[]) =
   let termWidth = try: terminalWidth() except: 80
   let useColor = when defined(windows): false
                  else: not noColor and isatty(stdout)
@@ -111,6 +112,7 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
   # Build display data
   var displays: seq[ProjectDisplay]
   for p in projects:
+    if p.entries.len == 0: continue
     var d = ProjectDisplay(
       path: p.path.relativeTo(rootPath),
       kind: primaryKind(p.kinds),
@@ -134,7 +136,7 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
       sorted.sort(proc(a, b: ProjectDisplay): int = cmp(b.totalSize, a.totalSize))
       groups[kind] = sorted
 
-  if projects.len == 0:
+  if displays.len == 0 and emptyDirs.len == 0:
     echo "No cleanable projects found in " & rootPath
     return
 
@@ -172,12 +174,11 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
     let sizeStr = " " & fmtSize(groupSize) & " "
     let lineLen = termWidth - kindStr.len - 1 - sizeStr.len - 1  # -1 for final ─
     let kColor = kindColor(kind)
-    const lineCh = when defined(windows): "-" else: "\u2500"
-    let line = lineCh.repeat(max(lineLen, 1))
+    let line = LineCh.repeat(max(lineLen, 1))
     let header = if useColor:
-      Bold & kColor & kindStr & Reset & " " & Dim & line & " " & Reset & kColor & fmtSize(groupSize) & Reset & Dim & " " & lineCh & Reset
+      Bold & kColor & kindStr & Reset & " " & Dim & line & " " & Reset & kColor & fmtSize(groupSize) & Reset & Dim & " " & LineCh & Reset
     else:
-      kindStr & " " & line & sizeStr & lineCh
+      kindStr & " " & line & sizeStr & LineCh
     echo header
 
     for d in projs:
@@ -232,10 +233,30 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
           else:
             echo rightColored
 
+  # Empty dirs group
+  if emptyDirs.len > 0:
+    let kindStr = "empty"
+    let sizeStr = " " & $emptyDirs.len & " dirs "
+    let lineLen = termWidth - kindStr.len - 1 - sizeStr.len - 1
+    let line = LineCh.repeat(max(lineLen, 1))
+    if useColor:
+      echo Bold & Blue & kindStr & Reset & " " & Dim & line & " " & Reset & Blue & $emptyDirs.len & " dirs" & Reset & Dim & " " & LineCh & Reset
+    else:
+      echo kindStr & " " & line & sizeStr & LineCh
+    var sortedEmpty = emptyDirs
+    sortedEmpty.sort()
+    for dir in sortedEmpty:
+      echo "  " & dir.relativeTo(rootPath) & "/"
+
   # Summary
   var totalBytes: int64 = 0
-  for p in projects: totalBytes += p.totalSize
-  let summary = "Total: " & $projects.len & " projects, " & fmtSize(totalBytes) & " reclaimable"
+  for d in displays: totalBytes += d.totalSize
+  var summaryParts: seq[string]
+  if displays.len > 0:
+    summaryParts.add $displays.len & " projects, " & fmtSize(totalBytes, pad = false) & " reclaimable"
+  if emptyDirs.len > 0:
+    summaryParts.add $emptyDirs.len & " empty directories"
+  let summary = "Total: " & summaryParts.join(", ")
   echo ""
   if useColor:
     echo Bold & summary & Reset
