@@ -131,7 +131,17 @@ jobs:
           cp artifacts/macos-signed/swoop.macintel release/
           cp artifacts/macos-signed/swoop.macarm release/
 
+      - name: Get tag message
+        id: tag_message
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          MSG=$(git tag -l --format='%(contents)' "$TAG" | head -c 10000)
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          body: ${{ steps.tag_message.outputs.body }}
