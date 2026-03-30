@@ -122,7 +122,8 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
       totalSize: p.totalSize,
     )
     for entry in p.entries:
-      let rel = entry.path.relativePath(p.path) & (if entry.isDir: "/" else: "")
+      let prefix = if entry.distclean: "*" else: ""
+      let rel = prefix & entry.path.relativePath(p.path) & (if entry.isDir: "/" else: "")
       d.entries.add EntryLine(folder: rel, size: fmtSize(entry.size), sizeBytes: entry.size, pruned: entry.pruned)
     # Sort: analyzer entries first (by size desc), then pruned (alphabetically)
     d.entries.sort(proc(a, b: EntryLine): int =
@@ -277,6 +278,13 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
   else:
     echo summary
 
+var cachedTermWidth = 0
+
+proc getTermWidth(): int =
+  if cachedTermWidth == 0:
+    cachedTermWidth = try: terminalWidth() except: 80
+  cachedTermWidth
+
 proc printCountProgress*(count: int) =
   when defined(windows):
     let spinChars = ["|", "/", "-", "\\"]
@@ -284,13 +292,13 @@ proc printCountProgress*(count: int) =
     let spinChars = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"]
   let ch = spinChars[(count div 50) mod spinChars.len]
   let line = "Scanning " & ch & " " & $count & " dirs"
-  let termWidth = try: terminalWidth() except: 80
-  let padded = if line.len < termWidth: line & " ".repeat(termWidth - line.len)
-               else: line[0 ..< termWidth]
+  let tw = getTermWidth()
+  let padded = if line.len < tw: line & " ".repeat(tw - line.len)
+               else: line[0 ..< tw]
   stderr.write "\r" & padded
   stderr.flushFile()
 
 proc clearProgress*() =
-  let termWidth = try: terminalWidth() except: 80
-  stderr.write "\r" & " ".repeat(termWidth) & "\r"
+  let tw = getTermWidth()
+  stderr.write "\r" & " ".repeat(tw) & "\r"
   stderr.flushFile()

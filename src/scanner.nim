@@ -259,6 +259,8 @@ proc scanProjects*(rootPaths: seq[string],
       let keepSet = localCfg.keep.toHashSet
 
       var targetDirs = allCleanDirs
+      let cleanSet = allCleanDirs.toHashSet
+      let distcleanSet = allDistcleanTargets.toHashSet - cleanSet
       if level == clDistclean:
         for d in allDistcleanTargets:
           if d notin targetDirs: targetDirs.add d
@@ -278,12 +280,13 @@ proc scanProjects*(rootPaths: seq[string],
       var entries: seq[CleanEntry]
       for d in filteredDirs:
         let fullPath = dir / d
+        let isDist = d in distcleanSet
         if dirExists(fullPath):
-          entries.add CleanEntry(path: fullPath, size: -1, isDir: true)
+          entries.add CleanEntry(path: fullPath, size: -1, isDir: true, distclean: isDist)
         elif fileExists(fullPath):
           try:
             let size = getFileSize(fullPath)
-            entries.add CleanEntry(path: fullPath, size: size, isDir: false)
+            entries.add CleanEntry(path: fullPath, size: size, isDir: false, distclean: isDist)
           except OSError:
             discard
 
@@ -302,30 +305,15 @@ proc scanProjects*(rootPaths: seq[string],
       let skipHere = resolveSkipSet(localCfg, inheritedSkip)
       let localDepth = if localCfg.maxDepth > 0: localCfg.maxDepth else: effectiveDepth
 
+      var nextRoot: string
       if isNewRoot:
         projectMap.add ProjectInfo(
           path: dir,
           kinds: kinds,
           entries: entries,
           artifactDirs: artifactDirs,
-          totalSize: 0,
-          hasLocalConfig: localCfg.typeOverride.len > 0 or
-                          localCfg.extraClean.len > 0 or
-                          localCfg.keep.len > 0,
-          isRoot: true,
         )
-        try:
-          for (kind, path) in walkDir(dir):
-            if kind != pcDir: continue
-            let name = path.extractFilename
-            if name in skipHere: continue
-            if name in negativeDirs: continue
-            if name in positiveDirs: continue
-            if localDepth > 0 and 1 > localDepth: continue
-            stack.add (path, 1, dir, skipHere, localCfg.root == "children")
-        except OSError:
-          result.errors.add "Cannot read: " & dir
-
+        nextRoot = dir
       else:
         for i in countdown(projectMap.len - 1, 0):
           if projectMap[i].path == currentRoot:
@@ -334,18 +322,18 @@ proc scanProjects*(rootPaths: seq[string],
             for d in artifactDirs:
               projectMap[i].artifactDirs.add d
             break
+        nextRoot = currentRoot
 
-        try:
-          for (kind, path) in walkDir(dir):
-            if kind != pcDir: continue
-            let name = path.extractFilename
-            if name in skipHere: continue
-            if name in negativeDirs: continue
-            if name in positiveDirs: continue
-            if localDepth > 0 and 1 > localDepth: continue
-            stack.add (path, 1, currentRoot, skipHere, localCfg.root == "children")
-        except OSError:
-          result.errors.add "Cannot read: " & dir
+      try:
+        for (kind, path) in walkDir(dir):
+          if kind != pcDir: continue
+          let name = path.extractFilename
+          if name in skipHere: continue
+          if name in negativeDirs: continue
+          if name in positiveDirs: continue
+          stack.add (path, 1, nextRoot, skipHere, localCfg.root == "children")
+      except OSError:
+        result.errors.add "Cannot read: " & dir
 
     else:
       if effectiveDepth > 0 and depth + 1 > effectiveDepth:

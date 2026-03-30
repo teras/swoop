@@ -41,5 +41,6 @@ proc analyzeNode*(dir: string): AnalyzeResult =
 
   # Positive dirs
   result.skipDirs.add "src"
-  result.skipDirs.add "public"
+  if "public" notin result.cleanTargets:
+    result.skipDirs.add "public"
   result.skipDirs.add "assets"

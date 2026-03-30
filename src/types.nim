@@ -36,7 +36,8 @@ type
     path*: string
     size*: int64
     isDir*: bool
-    pruned*: bool  ## true if from empty dir detection, not from analyzer
+    pruned*: bool     ## from empty dir detection
+    distclean*: bool  ## only with --all
 
   AnalyzeResult* = object
     cleanTargets*: seq[string]
@@ -49,9 +50,6 @@ type
     entries*: seq[CleanEntry]
     artifactDirs*: seq[string]  ## all known artifact paths (clean+distclean) for prune exclusion
     totalSize*: int64
-    hasLocalConfig*: bool
-    isRoot*: bool
-    error*: string
 
   LocalConfig* = object
     ignore*: bool
