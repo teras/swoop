@@ -28,6 +28,11 @@ proc analyzeNode*(dir: string): AnalyzeResult =
       result.cleanTargets.add ".cache"
       result.cleanTargets.add "public"  # Gatsby generates this
 
+    # Common build/cache directories
+    for d in [".parcel-cache", ".turbo", ".angular", "coverage"]:
+      if dirExists(dir / d):
+        result.cleanTargets.add d
+
     # distclean: node_modules
     result.distcleanTargets.add "node_modules"
 

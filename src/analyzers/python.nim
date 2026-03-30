@@ -21,7 +21,7 @@ proc analyzePython*(dir: string): AnalyzeResult =
     if dirExists(dir / d):
       result.distcleanTargets.add d
 
-  for d in [".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox"]:
+  for d in [".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "htmlcov"]:
     if dirExists(dir / d):
       result.distcleanTargets.add d
 

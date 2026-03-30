@@ -19,6 +19,10 @@ proc analyzeCMake*(dir: string): AnalyzeResult =
       if name notin result.cleanTargets:
         result.cleanTargets.add name
 
+  # CMakeFiles/ is always created in-source during configure
+  if dirExists(dir / "CMakeFiles"):
+    result.cleanTargets.add "CMakeFiles"
+
   result.skipDirs.add "src"
   result.skipDirs.add "include"
   result.skipDirs.add "cmake"

@@ -31,5 +31,9 @@ proc analyzeDotnet*(dir: string): AnalyzeResult =
   if dirExists(dir / "packages"):
     result.distcleanTargets.add "packages"
 
+  # .vs/ Visual Studio solution cache
+  if dirExists(dir / ".vs"):
+    result.distcleanTargets.add ".vs"
+
   result.skipDirs.add "Properties"
   result.skipDirs.add "wwwroot"
