@@ -147,6 +147,7 @@ swoop [options] [path...]
   --type TYPE         Only show/clean this project type
   --depth N           Max scan depth (default: unlimited)
   --no-color          Disable colored output
+  --no-progress       Static progress (no spinner, for scripts)
   --make-config PATH  Create a default .swoop.toml (use - to print to stdout)
   -h, --help          Show help
 ```

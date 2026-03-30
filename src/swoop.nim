@@ -10,6 +10,7 @@ proc main() =
     verbose = false
     quiet = false
     noColor = false
+    noProgress = false
     force = false
     makeConfigPath = ""
     numThreads = 0
@@ -36,6 +37,8 @@ proc main() =
       quiet = true
     of "--no-color":
       noColor = true
+    of "--no-progress":
+      noProgress = true
     of "-f", "--force":
       force = true
     of "--make-config":
@@ -87,6 +90,7 @@ Options:
   --type TYPE       Only show/clean this project type
   --depth N         Max scan depth (default: unlimited)
   --no-color        Disable colored output
+  --no-progress     Static progress (no spinner, for scripts)
   --make-config P   Create a default .swoop.toml (use - for stdout)
   -h, --help        Show this help"""
       quit(0)
@@ -112,37 +116,44 @@ Options:
   let level = if all: clDistclean else: clClean
   let dryRun = not execute
 
+  if not quiet and noProgress:
+    stderr.write "Scanning"
+    stderr.flushFile()
+
   var scanResult = scanProjects(
     rootPaths = paths,
     level = level,
     maxDepth = maxDepth,
     threads = numThreads,
     noSkip = noSkip,
-    onProgress = if not quiet: printCountProgress else: nil,
+    prune = prune,
+    onProgress = if not quiet and noProgress:
+                   (proc(count: int) =
+                     if count mod 1000 == 0:
+                       stderr.write "."
+                       stderr.flushFile())
+                 elif not quiet: printCountProgress
+                 else: nil,
   )
 
   if not quiet:
-    clearProgress()
-    stderr.write "\rCalculating..."
-    stderr.flushFile()
+    if noProgress:
+      stderr.writeLine ""
+    else:
+      clearProgress()
 
-  # Build exclude paths and do prune assignment on ALL projects before type filtering
-  var excludePaths: seq[string]
-  for p in scanResult.projects:
-    for d in p.artifactDirs:
-      excludePaths.add d
-
-  var emptyDirs: seq[string]
+  # Assign empty dirs to projects, collect orphans
   var orphanEmpty: seq[string]
   if prune:
-    var skipNames: seq[string]
-    for p in paths:
-      for s in buildAncestorSkipSet(p):
-        if s notin skipNames:
-          skipNames.add s
+    # Bottom-up rollup: collapse nested empty dirs to top-level
+    var emptySet: HashSet[string]
+    for d in scanResult.emptyDirs: emptySet.incl d
+    var rolledUp: seq[string]
+    for d in scanResult.emptyDirs:
+      if d.parentDir notin emptySet:
+        rolledUp.add d
 
-    emptyDirs = findEmptyDirs(paths, excludePaths, skipNames)
-    for emptyDir in emptyDirs:
+    for emptyDir in rolledUp:
       var bestIdx = -1
       var bestLen = 0
       for pi in 0 ..< scanResult.projects.len:
@@ -159,7 +170,7 @@ Options:
   if filterType != {}:
     scanResult.projects = scanResult.projects.filterIt((it.kinds * filterType) != {})
 
-  if not quiet:
+  if not quiet and not noProgress:
     clearProgress()
 
   if filterEmpty:
@@ -174,18 +185,17 @@ Options:
       echo "  " & e
 
   if filterEmpty:
-    # Only clean empty dirs
-    if not dryRun and (orphanEmpty.len > 0 or emptyDirs.len > 0):
+    if not dryRun and orphanEmpty.len > 0:
       if not force and not quiet:
-        stderr.write "Delete " & $emptyDirs.len & " empty directories? [y/N] "
+        stderr.write "Delete " & $orphanEmpty.len & " empty directories? [y/N] "
         stderr.flushFile()
         let answer = stdin.readLine().strip().toLowerAscii()
         if answer != "y" and answer != "yes":
           echo "Aborted."
           quit(0)
-      pruneEmptyDirs(emptyDirs, verbose = verbose)
+      pruneEmptyDirs(orphanEmpty, verbose = verbose)
       if not quiet:
-        echo "Pruned " & $emptyDirs.len & " empty directories"
+        echo "Pruned " & $orphanEmpty.len & " empty directories"
   elif not dryRun and scanResult.projects.len > 0:
     var totalBytes: int64 = 0
     for p in scanResult.projects: totalBytes += p.totalSize

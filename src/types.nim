@@ -64,6 +64,7 @@ type
 
   ScanResult* = object
     projects*: seq[ProjectInfo]
+    emptyDirs*: seq[string]  ## empty dirs found during scan (for --prune)
     errors*: seq[string]
 
 const

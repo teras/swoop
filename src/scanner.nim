@@ -1,4 +1,4 @@
-import std/[os, sets, strutils, sequtils, atomics, cpuinfo]
+import std/[os, sets, strutils, sequtils, atomics, cpuinfo, tables]
 import std/typedthreads
 import types, config
 import analyzers/base
@@ -209,6 +209,7 @@ proc scanProjects*(rootPaths: seq[string],
                    maxDepth: int = 0,
                    threads: int = 0,
                    noSkip: bool = false,
+                   prune: bool = false,
                    onProgress: proc(count: int) = nil): ScanResult =
   let effectiveDepth = maxDepth
 
@@ -217,8 +218,12 @@ proc scanProjects*(rootPaths: seq[string],
   for p in rootPaths:
     stack.add (p, 0, "", buildAncestorSkipSet(p), false)
 
+  var homeDir = getHomeDir().normalizedPath
+  if homeDir.endsWith("/"): homeDir = homeDir[0..^2]
+
   var scanned = 0
   var projectMap: seq[ProjectInfo]
+  var dirInfo: Table[string, tuple[hasFiles: bool, childDirs: int]]
 
   # Phase 1: Scan directories, detect projects, find clean targets (no size computation)
   while stack.len > 0:
@@ -232,7 +237,10 @@ proc scanProjects*(rootPaths: seq[string],
     if localCfg.ignore:
       continue
 
-    var kinds = detectProjectKinds(dir)
+    var kinds = if dir == homeDir:
+                  {}  # HOME is not a project
+                else:
+                  detectProjectKinds(dir)
     if localCfg.typeOverride.len > 0:
       kinds = {}
       for part in localCfg.typeOverride.splitWhitespace():
@@ -325,13 +333,25 @@ proc scanProjects*(rootPaths: seq[string],
         nextRoot = currentRoot
 
       try:
+        var hasFiles = false
+        var childDirs = 0
+        var hasEntries = false
         for (kind, path) in walkDir(dir):
-          if kind != pcDir: continue
+          hasEntries = true
+          if kind != pcDir:
+            hasFiles = true
+            continue
+          childDirs += 1
           let name = path.extractFilename
           if name in skipHere: continue
           if name in negativeDirs: continue
           if name in positiveDirs: continue
           stack.add (path, 1, nextRoot, skipHere, localCfg.root == "children")
+        if prune:
+          if not hasEntries:
+            result.emptyDirs.add dir
+          else:
+            dirInfo[dir] = (hasFiles, childDirs)
       except OSError:
         result.errors.add "Cannot read: " & dir
 
@@ -341,15 +361,49 @@ proc scanProjects*(rootPaths: seq[string],
       let skipHere = resolveSkipSet(localCfg, inheritedSkip)
       let childForceRoot = localCfg.root == "children"
       try:
+        var hasFiles = false
+        var childDirs = 0
+        var hasEntries = false
         for (kind, path) in walkDir(dir):
-          if kind != pcDir: continue
+          hasEntries = true
+          if kind != pcDir:
+            hasFiles = true
+            continue
+          childDirs += 1
           if path.extractFilename in skipHere: continue
           stack.add (path, depth + 1, currentRoot, skipHere, childForceRoot)
+        if prune:
+          if not hasEntries:
+            result.emptyDirs.add dir
+          else:
+            dirInfo[dir] = (hasFiles, childDirs)
       except OSError:
         result.errors.add "Cannot read: " & dir
 
   # Phase 2: Compute sizes in parallel
   let numThreads = if threads > 0: threads else: countProcessors()
   computeSizesParallel(projectMap, numThreads)
+
+  # Phase 3: Bottom-up empty dir rollup (in-memory, no filesystem calls)
+  if prune and result.emptyDirs.len > 0:
+    var emptySet = result.emptyDirs.toHashSet
+    var changed = true
+    while changed:
+      changed = false
+      # Count how many empty children each parent has
+      var emptyChildCount: Table[string, int]
+      for d in emptySet:
+        let parent = d.parentDir
+        emptyChildCount[parent] = emptyChildCount.getOrDefault(parent) + 1
+      for parent, count in emptyChildCount:
+        if parent in emptySet: continue
+        if parent in dirInfo:
+          let info = dirInfo[parent]
+          if not info.hasFiles and count >= info.childDirs:
+            emptySet.incl parent
+            changed = true
+    result.emptyDirs = @[]
+    for d in emptySet:
+      result.emptyDirs.add d
 
   result.projects = projectMap
