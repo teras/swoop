@@ -132,7 +132,7 @@ linux:linux64	## Create only Linux Intel target. Currently only 64 bit is produc
 
 linux64:target/${EXECNAME}.linux	## Create only Linux Intel (64) target
 
-linux32:target/${EXECNAME}.linux32	## Create only Linux Intel (32) target
+linux32:target/${EXECNAME}.32.linux	## Create only Linux Intel (32) target
 
 windows:win32 win64	 ## Create Windows target, both 32 and 64 bit
 
@@ -241,7 +241,7 @@ target/${EXECNAME}.linux:${BUILDDEP}
 	$(DOCKER) run --rm -v `pwd`:/usr/src/app -w /usr/src/app ${CONTAINER} bash -c "$(NIMVER) nim $(COMPILERLINUX) $(BASENIMOPTS) ${EXTRA} ${TYPEPARAM} -o:./target/${OUT} ${NIMSRC}"
 	if [ "$(DOCOMPRESS)" = "t" ] ; then upx --best ./target/${OUT} ; fi
 
-target/${EXECNAME}.linux32:${BUILDDEP}
+target/${EXECNAME}.32.linux:${BUILDDEP}
 	@printf "$(HELPLINUX)"
 	mkdir -p target
 	$(eval CPREF:=/cross/i686-linux-musl-cross/bin/i686-linux-musl-)
@@ -310,7 +310,7 @@ install-only:	## Only install binaries, without rebuilding them
 	set -e ; mkdir -p ${DEST}/all
 	set -e ; rm -rf ${DEST}/all/${EXECNAME}.* ; rm -f ${DEST}/darwin-arm64/${EXECNAME} ${DEST}/darwin-x86_64/${EXECNAME} ${DEST}/darwin/${EXECNAME} ${DEST}/linux-x86_64/${EXECNAME} ${DEST}/linux-i386/${EXECNAME} ${DEST}/linux-arm/${EXECNAME} ${DEST}/linux-aarch64/${EXECNAME} ${DEST}/windows-x86_64/${EXECNAME}.exe ${DEST}/windows-i686/${EXECNAME}.exe ${DEST}/windows-x86_64/${EXECNAME}.dll ${DEST}/windows-i686/${EXECNAME}.dll
 	set -e ; if [ -f target/${EXECNAME}.linux         ] ; then mkdir -p ${DEST}/linux-x86_64   && cp target/${EXECNAME}.linux         ${DEST}/all/ && ln -s ../all/${EXECNAME}.linux         ${DEST}/linux-x86_64/${EXECNAME}       ; fi
-	set -e ; if [ -f target/${EXECNAME}.linux32       ] ; then mkdir -p ${DEST}/linux-i386     && cp target/${EXECNAME}.linux32       ${DEST}/all/ && ln -s ../all/${EXECNAME}.linux32       ${DEST}/linux-i386/${EXECNAME}         ; fi
+	set -e ; if [ -f target/${EXECNAME}.32.linux       ] ; then mkdir -p ${DEST}/linux-i386     && cp target/${EXECNAME}.32.linux       ${DEST}/all/ && ln -s ../all/${EXECNAME}.32.linux       ${DEST}/linux-i386/${EXECNAME}         ; fi
 	set -e ; if [ -f target/${EXECNAME}.arm.linux     ] ; then mkdir -p ${DEST}/linux-arm      && cp target/${EXECNAME}.arm.linux     ${DEST}/all/ && ln -s ../all/${EXECNAME}.arm.linux     ${DEST}/linux-arm/${EXECNAME}          ; fi
 	set -e ; if [ -f target/${EXECNAME}.aarch64.linux ] ; then mkdir -p ${DEST}/linux-aarch64  && cp target/${EXECNAME}.aarch64.linux ${DEST}/all/ && ln -s ../all/${EXECNAME}.aarch64.linux ${DEST}/linux-aarch64/${EXECNAME}      ; fi
 	set -e ; if [ -f target/${EXECNAME}.64.exe        ] ; then mkdir -p ${DEST}/windows-x86_64 && cp target/${EXECNAME}.64.exe        ${DEST}/all/ && ln -s ../all/${EXECNAME}.64.exe        ${DEST}/windows-x86_64/${EXECNAME}.exe ; fi

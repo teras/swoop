@@ -1,3 +1,5 @@
+import std/tables
+
 type
   ProjectKind* = enum
     pkAnt = "ant"
@@ -65,6 +67,7 @@ type
   ScanResult* = object
     projects*: seq[ProjectInfo]
     emptyDirs*: seq[string]  ## empty dirs found during scan (for --prune)
+    dirInfo*: Table[string, tuple[hasFiles: bool, childDirs: int]]  ## for prune rollup
     errors*: seq[string]
 
 const

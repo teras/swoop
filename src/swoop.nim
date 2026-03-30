@@ -128,10 +128,13 @@ Options:
     noSkip = noSkip,
     prune = prune,
     onProgress = if not quiet and noProgress:
-                   (proc(count: int) =
-                     if count mod 1000 == 0:
+                   (var dots = 0;
+                   proc(count: int) =
+                     let needed = count div 1000
+                     while dots < needed:
                        stderr.write "."
-                       stderr.flushFile())
+                       inc dots
+                     stderr.flushFile())
                  elif not quiet: printCountProgress
                  else: nil,
   )

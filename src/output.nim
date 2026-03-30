@@ -146,7 +146,10 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
   for kind in ProjectKind:
     if kind in groups:
       var sorted = groups[kind]
-      sorted.sort(proc(a, b: ProjectDisplay): int = cmp(b.totalSize, a.totalSize))
+      sorted.sort(proc(a, b: ProjectDisplay): int =
+        let s = cmp(b.totalSize, a.totalSize)
+        if s != 0: return s
+        cmp(a.path, b.path))
       groups[kind] = sorted
 
   if displays.len == 0 and emptyDirs.len == 0:

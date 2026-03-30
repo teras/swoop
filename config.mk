@@ -1,3 +1,3 @@
 NAME=swoop
 SRCDIR=src
-NIMBLE=parsetoml regex
+NIMBLE=parsetoml regex threading

@@ -1,4 +1,4 @@
-import std/[os, sets, strutils, sequtils, atomics, cpuinfo, tables]
+import std/[os, sets, strutils, atomics, cpuinfo, tables]
 import std/typedthreads
 import types, config
 import analyzers/base
@@ -113,9 +113,6 @@ proc detectProjectKinds*(dir: string): set[ProjectKind] =
         result.incl pkZig
         break
 
-  if pkSwift notin result and dirExists(dir / ".swiftpm"):
-    result.incl pkSwift
-
   if pkGodot notin result and dirExists(dir / ".godot"):
     result.incl pkGodot
 
@@ -202,43 +199,39 @@ proc computeSizesParallel(projects: var seq[ProjectInfo], numThreads: int) =
 
   deallocShared(state)
 
-# --- Main scanner ---
+# --- Scan types ---
 
-proc scanProjects*(rootPaths: seq[string],
-                   level: CleanLevel = clClean,
-                   maxDepth: int = 0,
-                   threads: int = 0,
-                   noSkip: bool = false,
-                   prune: bool = false,
-                   onProgress: proc(count: int) = nil): ScanResult =
-  let effectiveDepth = maxDepth
+type
+  DirEntry = tuple[path: string, depth: int, rootProject: string, skipSet: HashSet[string], forceRoot: bool]
 
-  type DirEntry = tuple[path: string, depth: int, rootProject: string, skipSet: HashSet[string], forceRoot: bool]
-  var stack: seq[DirEntry]
-  for p in rootPaths:
-    stack.add (p, 0, "", buildAncestorSkipSet(p), false)
+  SubtreeResult = object
+    projects: seq[ProjectInfo]
+    emptyDirs: seq[string]
+    dirInfo: Table[string, tuple[hasFiles: bool, childDirs: int]]
+    errors: seq[string]
+    scanned: int
 
-  var homeDir = getHomeDir().normalizedPath
-  if homeDir.endsWith("/"): homeDir = homeDir[0..^2]
+# --- Core scan logic (used by both single and multi-threaded) ---
 
-  var scanned = 0
-  var projectMap: seq[ProjectInfo]
-  var dirInfo: Table[string, tuple[hasFiles: bool, childDirs: int]]
+proc scanSubtree(initialEntries: seq[DirEntry], level: CleanLevel,
+                 effectiveDepth: int, noSkip: bool, prune: bool,
+                 homeDir: string,
+                 onProgress: proc(count: int) = nil): SubtreeResult =
+  var stack = initialEntries
 
-  # Phase 1: Scan directories, detect projects, find clean targets (no size computation)
   while stack.len > 0:
     let (dir, depth, currentRoot, inheritedSkip, forceRoot) = stack.pop()
-    inc scanned
+    inc result.scanned
 
-    if onProgress != nil:
-      onProgress(scanned)
+    if onProgress != nil and (result.scanned mod 50) == 0:
+      onProgress(result.scanned)
 
     let localCfg = loadLocalConfig(dir)
     if localCfg.ignore:
       continue
 
     var kinds = if dir == homeDir:
-                  {}  # HOME is not a project
+                  {}
                 else:
                   detectProjectKinds(dir)
     if localCfg.typeOverride.len > 0:
@@ -252,7 +245,6 @@ proc scanProjects*(rootPaths: seq[string],
       kinds.incl pkCustom
 
     if kinds != {}:
-      # Always analyze (needed for traversal decisions)
       var analyzeResults: seq[AnalyzeResult]
       for kind in kinds:
         analyzeResults.add analyze(dir, kind)
@@ -273,7 +265,6 @@ proc scanProjects*(rootPaths: seq[string],
         for d in allDistcleanTargets:
           if d notin targetDirs: targetDirs.add d
 
-      # Filter out dirs that are subdirectories of other clean dirs
       var filteredDirs: seq[string]
       for d in targetDirs:
         if d in keepSet: continue
@@ -298,7 +289,6 @@ proc scanProjects*(rootPaths: seq[string],
           except OSError:
             discard
 
-      # All known paths (artifacts + source dirs) for prune exclusion
       var artifactDirs: seq[string]
       for d in allCleanDirs & allDistcleanTargets & merged.skipDirs:
         let fullPath = dir / d
@@ -311,11 +301,10 @@ proc scanProjects*(rootPaths: seq[string],
                          else: merged.skipDirs.toHashSet
       for t in localCfg.traverseScan: positiveDirs.excl t
       let skipHere = resolveSkipSet(localCfg, inheritedSkip)
-      let localDepth = if localCfg.maxDepth > 0: localCfg.maxDepth else: effectiveDepth
 
       var nextRoot: string
       if isNewRoot:
-        projectMap.add ProjectInfo(
+        result.projects.add ProjectInfo(
           path: dir,
           kinds: kinds,
           entries: entries,
@@ -323,12 +312,12 @@ proc scanProjects*(rootPaths: seq[string],
         )
         nextRoot = dir
       else:
-        for i in countdown(projectMap.len - 1, 0):
-          if projectMap[i].path == currentRoot:
+        for i in countdown(result.projects.len - 1, 0):
+          if result.projects[i].path == currentRoot:
             for e in entries:
-              projectMap[i].entries.add e
+              result.projects[i].entries.add e
             for d in artifactDirs:
-              projectMap[i].artifactDirs.add d
+              result.projects[i].artifactDirs.add d
             break
         nextRoot = currentRoot
 
@@ -351,7 +340,7 @@ proc scanProjects*(rootPaths: seq[string],
           if not hasEntries:
             result.emptyDirs.add dir
           else:
-            dirInfo[dir] = (hasFiles, childDirs)
+            result.dirInfo[dir] = (hasFiles, childDirs)
       except OSError:
         result.errors.add "Cannot read: " & dir
 
@@ -376,34 +365,218 @@ proc scanProjects*(rootPaths: seq[string],
           if not hasEntries:
             result.emptyDirs.add dir
           else:
-            dirInfo[dir] = (hasFiles, childDirs)
+            result.dirInfo[dir] = (hasFiles, childDirs)
       except OSError:
         result.errors.add "Cannot read: " & dir
 
-  # Phase 2: Compute sizes in parallel
+# --- Parallel scan worker ---
+
+import threading/channels
+
+type
+  ScanWorkerArg = object
+    work: ptr seq[DirEntry]
+    nextTask: ptr Atomic[int]
+    level: CleanLevel
+    effectiveDepth: int
+    noSkip: bool
+    prune: bool
+    homeDir: string
+    ch: ptr Chan[SubtreeResult]
+
+proc scanWorker(arg: ScanWorkerArg) {.thread.} =
+  {.cast(gcsafe).}:
+    var combined: SubtreeResult
+    while true:
+      let idx = arg.nextTask[].fetchAdd(1)
+      if idx >= arg.work[].len: break
+      let entry = arg.work[][idx]
+      let sub = scanSubtree(@[entry], arg.level, arg.effectiveDepth,
+                            arg.noSkip, arg.prune, arg.homeDir)
+      for proj in sub.projects: combined.projects.add proj
+      for d in sub.emptyDirs: combined.emptyDirs.add d
+      for e in sub.errors: combined.errors.add e
+      for k, v in sub.dirInfo: combined.dirInfo[k] = v
+      combined.scanned += sub.scanned
+    arg.ch[].send(move combined)
+
+# --- Main scanner ---
+
+proc scanProjects*(rootPaths: seq[string],
+                   level: CleanLevel = clClean,
+                   maxDepth: int = 0,
+                   threads: int = 0,
+                   noSkip: bool = false,
+                   prune: bool = false,
+                   onProgress: proc(count: int) = nil): ScanResult =
+  let effectiveDepth = maxDepth
   let numThreads = if threads > 0: threads else: countProcessors()
-  computeSizesParallel(projectMap, numThreads)
+
+  var homeDir = getHomeDir().normalizedPath
+  if homeDir.endsWith("/"): homeDir = homeDir[0..^2]
+
+  # Step 1: Process root paths to collect top-level work items
+  var topLevelWork: seq[DirEntry]
+
+  for p in rootPaths:
+    let initialSkip = buildAncestorSkipSet(p)
+    let localCfg = loadLocalConfig(p)
+    if localCfg.ignore: continue
+
+    var kinds = if p == homeDir: {} else: detectProjectKinds(p)
+    if localCfg.typeOverride.len > 0:
+      kinds = {}
+      for part in localCfg.typeOverride.splitWhitespace():
+        for kind in ProjectKind:
+          if $kind == part: kinds.incl kind
+    let hasExtraTargets = localCfg.extraClean.len > 0 or localCfg.extraAll.len > 0
+    if hasExtraTargets and kinds == {}:
+      kinds.incl pkCustom
+
+    if kinds != {}:
+      # Root path is a project — scan full subtree directly
+      let rootResult = scanSubtree(@[(p, 0, "", initialSkip, false)],
+                                   level, effectiveDepth, noSkip, prune, homeDir,
+                                   onProgress)
+      for proj in rootResult.projects: result.projects.add proj
+      for d in rootResult.emptyDirs: result.emptyDirs.add d
+      for e in rootResult.errors: result.errors.add e
+      for k, v in rootResult.dirInfo: result.dirInfo[k] = v
+      if onProgress != nil: onProgress(rootResult.scanned)
+    else:
+      # Root path is not a project — collect children as work items
+      let skipHere = resolveSkipSet(localCfg, initialSkip)
+      let childForceRoot = localCfg.root == "children"
+      try:
+        for (kind, path) in walkDir(p):
+          if kind != pcDir: continue
+          if path.extractFilename in skipHere: continue
+          topLevelWork.add (path, 1, "", skipHere, childForceRoot)
+      except OSError:
+        result.errors.add "Cannot read: " & p
+      if prune:
+        var hasEntries = false
+        try:
+          for entry in walkDir(p):
+            hasEntries = true
+            break
+        except OSError: discard
+        if not hasEntries:
+          result.emptyDirs.add p
+
+  # Expand work items for better parallel distribution
+  # If we have few top-level items, go one level deeper for non-project dirs
+  if numThreads > 1:
+    var expandRound = 0
+    while topLevelWork.len < numThreads * 4 and expandRound < 3:
+      inc expandRound
+      var expanded: seq[DirEntry]
+      var didExpand = false
+      for entry in topLevelWork:
+        let cfg = loadLocalConfig(entry.path)
+        if cfg.ignore:
+          continue
+        let kinds = if entry.path == homeDir: {} else: detectProjectKinds(entry.path)
+        if kinds != {} or (cfg.extraClean.len > 0 or cfg.extraAll.len > 0):
+          expanded.add entry  # keep projects as-is
+        else:
+          # Not a project — add its children instead
+          let skip = resolveSkipSet(cfg, entry.skipSet)
+          let force = cfg.root == "children"
+          var hasFiles = false
+          var childDirs = 0
+          var hasEntries = false
+          try:
+            for (kind, path) in walkDir(entry.path):
+              hasEntries = true
+              if kind != pcDir:
+                hasFiles = true
+                continue
+              childDirs += 1
+              if path.extractFilename in skip: continue
+              expanded.add (path, entry.depth + 1, entry.rootProject, skip, force or entry.forceRoot)
+              didExpand = true
+          except OSError: discard
+          if prune:
+            if not hasEntries:
+              result.emptyDirs.add entry.path
+            else:
+              result.dirInfo[entry.path] = (hasFiles, childDirs)
+      if not didExpand: break
+      topLevelWork = expanded
+
+  # Step 2: Process top-level work items
+  if topLevelWork.len > 0:
+    if numThreads <= 1 or topLevelWork.len <= 1:
+      # Single-threaded
+      let sub = scanSubtree(topLevelWork, level, effectiveDepth, noSkip, prune, homeDir,
+                            onProgress)
+      for proj in sub.projects: result.projects.add proj
+      for d in sub.emptyDirs: result.emptyDirs.add d
+      for e in sub.errors: result.errors.add e
+      for k, v in sub.dirInfo: result.dirInfo[k] = v
+      if onProgress != nil: onProgress(sub.scanned)
+    else:
+      # Multi-threaded: work-stealing — each worker picks dirs one at a time
+      if onProgress != nil:
+        onProgress(0)
+      let workerCount = min(numThreads, topLevelWork.len)
+      var ch = newChan[SubtreeResult](workerCount)
+      var nextTask: Atomic[int]
+      nextTask.store(0)
+
+      var scanThreads = newSeq[Thread[ScanWorkerArg]](workerCount)
+      for i in 0 ..< workerCount:
+        createThread(scanThreads[i], scanWorker, ScanWorkerArg(
+          work: addr topLevelWork,
+          nextTask: addr nextTask,
+          level: level,
+          effectiveDepth: effectiveDepth,
+          noSkip: noSkip,
+          prune: prune,
+          homeDir: homeDir,
+          ch: addr ch,
+        ))
+
+      # Collect results
+      var totalScanned = 0
+      for i in 0 ..< workerCount:
+        var sub = ch.recv()
+        for proj in sub.projects: result.projects.add proj
+        for d in sub.emptyDirs: result.emptyDirs.add d
+        for e in sub.errors: result.errors.add e
+        for k, v in sub.dirInfo: result.dirInfo[k] = v
+        totalScanned += sub.scanned
+        if onProgress != nil:
+          onProgress(totalScanned)
+
+      for i in 0 ..< workerCount:
+        joinThread(scanThreads[i])
+
+      if onProgress != nil: onProgress(totalScanned)
+
+  # Phase 2: Compute sizes in parallel
+  computeSizesParallel(result.projects, numThreads)
 
   # Phase 3: Bottom-up empty dir rollup (in-memory, no filesystem calls)
   if prune and result.emptyDirs.len > 0:
+    let allDirInfo = result.dirInfo
+
     var emptySet = result.emptyDirs.toHashSet
     var changed = true
     while changed:
       changed = false
-      # Count how many empty children each parent has
       var emptyChildCount: Table[string, int]
       for d in emptySet:
         let parent = d.parentDir
         emptyChildCount[parent] = emptyChildCount.getOrDefault(parent) + 1
       for parent, count in emptyChildCount:
         if parent in emptySet: continue
-        if parent in dirInfo:
-          let info = dirInfo[parent]
+        if parent in allDirInfo:
+          let info = allDirInfo[parent]
           if not info.hasFiles and count >= info.childDirs:
             emptySet.incl parent
             changed = true
     result.emptyDirs = @[]
     for d in emptySet:
       result.emptyDirs.add d
-
-  result.projects = projectMap
