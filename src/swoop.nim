@@ -1,4 +1,4 @@
-import std/[os, strutils, sequtils]
+import std/[os, strutils, sequtils, sets]
 import types, config, scanner, output, cleaner
 
 proc main() =
@@ -87,7 +87,7 @@ Options:
   --type TYPE       Only show/clean this project type
   --depth N         Max scan depth (default: unlimited)
   --no-color        Disable colored output
-  --make-config P   Create a default .swoop.toml at path P
+  --make-config P   Create a default .swoop.toml (use - for stdout)
   -h, --help        Show this help"""
       quit(0)
     else:
@@ -121,32 +121,46 @@ Options:
     onProgress = if not quiet: printCountProgress else: nil,
   )
 
+  if not quiet:
+    clearProgress()
+    stderr.write "\rCalculating..."
+    stderr.flushFile()
+
+  # Build exclude paths and do prune assignment on ALL projects before type filtering
+  var excludePaths: seq[string]
+  for p in scanResult.projects:
+    for d in p.artifactDirs:
+      excludePaths.add d
+
+  var emptyDirs: seq[string]
+  var orphanEmpty: seq[string]
+  if prune:
+    var skipNames: seq[string]
+    for p in paths:
+      for s in buildAncestorSkipSet(p):
+        if s notin skipNames:
+          skipNames.add s
+
+    emptyDirs = findEmptyDirs(paths, excludePaths, skipNames)
+    for emptyDir in emptyDirs:
+      var bestIdx = -1
+      var bestLen = 0
+      for pi in 0 ..< scanResult.projects.len:
+        let pp = scanResult.projects[pi].path
+        if emptyDir.startsWith(pp & "/") and pp.len > bestLen:
+          bestIdx = pi
+          bestLen = pp.len
+      if bestIdx >= 0:
+        scanResult.projects[bestIdx].entries.add CleanEntry(
+          path: emptyDir, size: 0, isDir: true, pruned: true)
+      else:
+        orphanEmpty.add emptyDir
+
   if filterType != {}:
     scanResult.projects = scanResult.projects.filterIt((it.kinds * filterType) != {})
 
   if not quiet:
     clearProgress()
-
-  var emptyDirs: seq[string]
-  var orphanEmpty: seq[string]
-  if prune:
-    var excludePaths: seq[string]
-    for p in scanResult.projects:
-      for d in p.artifactDirs:
-        excludePaths.add d
-
-    emptyDirs = findEmptyDirs(paths, excludePaths, DefaultGlobalSkip)
-    for emptyDir in emptyDirs:
-      # Assign to nearest project
-      var assigned = false
-      for pi in 0 ..< scanResult.projects.len:
-        if emptyDir.startsWith(scanResult.projects[pi].path & "/"):
-          scanResult.projects[pi].entries.add CleanEntry(
-            path: emptyDir, size: 0, isDir: true)
-          assigned = true
-          break
-      if not assigned:
-        orphanEmpty.add emptyDir
 
   if filterEmpty:
     printResults(@[], paths[0], execute, noColor, orphanEmpty)

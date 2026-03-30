@@ -33,6 +33,7 @@ proc kindColor*(kind: ProjectKind): string =
 
 proc kindScore(kind: ProjectKind): int =
   case kind
+  of pkCustom: 0
   of pkFlatpak: 1
   of pkMakefile: 5
   of pkAnt: 10
@@ -98,6 +99,7 @@ type
     folder: string
     size: string
     sizeBytes: int64
+    pruned: bool
 
   ProjectDisplay = object
     path: string
@@ -115,13 +117,22 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
   for p in projects:
     if p.entries.len == 0: continue
     var d = ProjectDisplay(
-      path: p.path.relativeTo(rootPath),
+      path: (let rel = p.path.relativeTo(rootPath); if rel.len == 0: "." else: rel),
       kind: primaryKind(p.kinds),
       totalSize: p.totalSize,
     )
     for entry in p.entries:
       let rel = entry.path.relativePath(p.path) & (if entry.isDir: "/" else: "")
-      d.entries.add EntryLine(folder: rel, size: fmtSize(entry.size), sizeBytes: entry.size)
+      d.entries.add EntryLine(folder: rel, size: fmtSize(entry.size), sizeBytes: entry.size, pruned: entry.pruned)
+    # Sort: analyzer entries first (by size desc), then pruned (alphabetically)
+    d.entries.sort(proc(a, b: EntryLine): int =
+      if a.pruned != b.pruned:
+        return if a.pruned: 1 else: -1
+      if a.pruned:
+        return cmp(a.folder, b.folder)
+      let s = cmp(b.sizeBytes, a.sizeBytes)
+      if s != 0: return s
+      cmp(a.folder, b.folder))
     displays.add d
 
   # Group by primary kind
@@ -188,8 +199,10 @@ proc printResults*(projects: seq[ProjectInfo], rootPath: string, execute: bool, 
         continue
 
       for ei, entry in d.entries:
-        let alignedSize = entry.size.align(sizeCol)
-        let rightFixedLen = gap + sizeCol  # " ".repeat(gap) + aligned size
+
+        let alignedSize = if entry.pruned: " ".repeat(sizeCol)
+                          else: entry.size.align(sizeCol)
+        let rightFixedLen = gap + sizeCol
 
         if ei == 0:
           # First entry: project name + folder + size must fit in termWidth

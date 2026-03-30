@@ -9,6 +9,7 @@ proc analyze*(dir: string, kind: ProjectKind): AnalyzeResult =
   of pkBazel: analyzeBazel(dir)
   of pkBundler: analyzeBundler(dir)
   of pkCargo: analyzeCargo(dir)
+  of pkCustom: AnalyzeResult()
   of pkCMake: analyzeCMake(dir)
   of pkComposer: analyzeComposer(dir)
   of pkDart: analyzeDart(dir)

@@ -83,6 +83,51 @@ proc detectProjectKinds*(dir: string): set[ProjectKind] =
       dirExists(dir / "node_modules")):
     result.incl pkNode
 
+  # --- Artifact-based fallback detection ---
+  # Detect project types by unique build artifacts even without project definition files
+
+  if pkPython notin result:
+    for d in ["__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox"]:
+      if dirExists(dir / d):
+        result.incl pkPython
+        break
+  if pkPython notin result:
+    for d in ["venv", ".venv"]:
+      if fileExists(dir / d / "bin" / "python") or
+         fileExists(dir / d / "Scripts" / "python.exe"):
+        result.incl pkPython
+        break
+
+  if pkNode notin result:
+    for d in [".next", ".nuxt", ".parcel-cache", ".turbo", ".angular"]:
+      if dirExists(dir / d):
+        result.incl pkNode
+        break
+
+  if pkNim notin result and dirExists(dir / "nimcache"):
+    result.incl pkNim
+
+  if pkZig notin result:
+    for d in ["zig-cache", ".zig-cache", "zig-out"]:
+      if dirExists(dir / d):
+        result.incl pkZig
+        break
+
+  if pkSwift notin result and dirExists(dir / ".swiftpm"):
+    result.incl pkSwift
+
+  if pkGodot notin result and dirExists(dir / ".godot"):
+    result.incl pkGodot
+
+  if pkJekyll notin result and dirExists(dir / ".jekyll-cache"):
+    result.incl pkJekyll
+
+  if pkDart notin result and dirExists(dir / ".dart_tool"):
+    result.incl pkDart
+
+  if pkHaskell notin result and dirExists(dir / ".stack-work"):
+    result.incl pkHaskell
+
 proc getDirSize*(path: string): int64 =
   try:
     for entry in walkDirRec(path):
@@ -165,20 +210,19 @@ proc scanProjects*(rootPaths: seq[string],
                    threads: int = 0,
                    noSkip: bool = false,
                    onProgress: proc(count: int) = nil): ScanResult =
-  let defaultSkip = DefaultGlobalSkip.toHashSet
   let effectiveDepth = maxDepth
 
-  type DirEntry = tuple[path: string, depth: int, rootProject: string, skipSet: HashSet[string]]
+  type DirEntry = tuple[path: string, depth: int, rootProject: string, skipSet: HashSet[string], forceRoot: bool]
   var stack: seq[DirEntry]
   for p in rootPaths:
-    stack.add (p, 0, "", defaultSkip)
+    stack.add (p, 0, "", buildAncestorSkipSet(p), false)
 
   var scanned = 0
   var projectMap: seq[ProjectInfo]
 
   # Phase 1: Scan directories, detect projects, find clean targets (no size computation)
   while stack.len > 0:
-    let (dir, depth, currentRoot, inheritedSkip) = stack.pop()
+    let (dir, depth, currentRoot, inheritedSkip, forceRoot) = stack.pop()
     inc scanned
 
     if onProgress != nil:
@@ -195,6 +239,10 @@ proc scanProjects*(rootPaths: seq[string],
         for kind in ProjectKind:
           if $kind == part: kinds.incl kind
 
+    let hasExtraTargets = localCfg.extraClean.len > 0 or localCfg.extraAll.len > 0
+    if hasExtraTargets and kinds == {}:
+      kinds.incl pkCustom
+
     if kinds != {}:
       # Always analyze (needed for traversal decisions)
       var analyzeResults: seq[AnalyzeResult]
@@ -206,6 +254,8 @@ proc scanProjects*(rootPaths: seq[string],
       var allDistcleanTargets = merged.distcleanTargets
       for d in localCfg.extraClean:
         if d notin allCleanDirs: allCleanDirs.add d
+      for d in localCfg.extraAll:
+        if d notin allDistcleanTargets: allDistcleanTargets.add d
       let keepSet = localCfg.keep.toHashSet
 
       var targetDirs = allCleanDirs
@@ -237,14 +287,14 @@ proc scanProjects*(rootPaths: seq[string],
           except OSError:
             discard
 
-      # All artifact paths (clean + distclean) as full paths for prune exclusion
+      # All known paths (artifacts + source dirs) for prune exclusion
       var artifactDirs: seq[string]
-      for d in allCleanDirs & allDistcleanTargets:
+      for d in allCleanDirs & allDistcleanTargets & merged.skipDirs:
         let fullPath = dir / d
         if dirExists(fullPath):
           artifactDirs.add fullPath
 
-      let isNewRoot = currentRoot.len == 0 or localCfg.root
+      let isNewRoot = currentRoot.len == 0 or localCfg.root == "self" or forceRoot
       let negativeDirs = (allCleanDirs & allDistcleanTargets).toHashSet
       var positiveDirs = if noSkip: initHashSet[string]()
                          else: merged.skipDirs.toHashSet
@@ -272,7 +322,7 @@ proc scanProjects*(rootPaths: seq[string],
             if name in negativeDirs: continue
             if name in positiveDirs: continue
             if localDepth > 0 and 1 > localDepth: continue
-            stack.add (path, 1, dir, skipHere)
+            stack.add (path, 1, dir, skipHere, localCfg.root == "children")
         except OSError:
           result.errors.add "Cannot read: " & dir
 
@@ -293,7 +343,7 @@ proc scanProjects*(rootPaths: seq[string],
             if name in negativeDirs: continue
             if name in positiveDirs: continue
             if localDepth > 0 and 1 > localDepth: continue
-            stack.add (path, 1, currentRoot, skipHere)
+            stack.add (path, 1, currentRoot, skipHere, localCfg.root == "children")
         except OSError:
           result.errors.add "Cannot read: " & dir
 
@@ -301,15 +351,14 @@ proc scanProjects*(rootPaths: seq[string],
       if effectiveDepth > 0 and depth + 1 > effectiveDepth:
         continue
       let skipHere = resolveSkipSet(localCfg, inheritedSkip)
+      let childForceRoot = localCfg.root == "children"
       try:
         for (kind, path) in walkDir(dir):
           if kind != pcDir: continue
           if path.extractFilename in skipHere: continue
-          stack.add (path, depth + 1, currentRoot, skipHere)
+          stack.add (path, depth + 1, currentRoot, skipHere, childForceRoot)
       except OSError:
         result.errors.add "Cannot read: " & dir
-
-  discard scanned
 
   # Phase 2: Compute sizes in parallel
   let numThreads = if threads > 0: threads else: countProcessors()

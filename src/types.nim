@@ -4,6 +4,7 @@ type
     pkBazel = "bazel"
     pkBundler = "bundler"
     pkCargo = "cargo"
+    pkCustom = "custom"
     pkCMake = "cmake"
     pkComposer = "composer"
     pkDart = "dart"
@@ -35,6 +36,7 @@ type
     path*: string
     size*: int64
     isDir*: bool
+    pruned*: bool  ## true if from empty dir detection, not from analyzer
 
   AnalyzeResult* = object
     cleanTargets*: seq[string]
@@ -53,9 +55,10 @@ type
 
   LocalConfig* = object
     ignore*: bool
-    root*: bool
+    root*: string  # "", "self", "children"
     typeOverride*: string
     extraClean*: seq[string]
+    extraAll*: seq[string]
     keep*: seq[string]
     skipScan*: seq[string]     # extra dirs to skip scanning
     traverseScan*: seq[string] # undo global_skip for this project

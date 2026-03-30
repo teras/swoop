@@ -129,7 +129,7 @@ This is driven by each analyzer reading the actual build files, not hardcoded li
 
 ### Root project aggregation
 
-Nested projects automatically aggregate under their nearest root. A Maven multi-module project with 50 submodules appears as **one entry** with combined size. Use `root = true` in `.swoop.toml` to break out a nested project into its own root.
+Nested projects automatically aggregate under their nearest root. A Maven multi-module project with 50 submodules appears as **one entry** with combined size. Use `root = "self"` in `.swoop.toml` to break out a nested project into its own root, or `root = "children"` to split all sub-projects.
 
 ## 📋 All Options
 
@@ -147,7 +147,7 @@ swoop [options] [path...]
   --type TYPE         Only show/clean this project type
   --depth N           Max scan depth (default: unlimited)
   --no-color          Disable colored output
-  --make-config PATH  Create a default .swoop.toml
+  --make-config PATH  Create a default .swoop.toml (use - to print to stdout)
   -h, --help          Show help
 ```
 
@@ -167,7 +167,7 @@ nim c --threads:on -d:release -d:strip -d:lto --opt:speed -o:target/swoop src/sw
 
 - You **don't need** `.swoop.toml` for most projects — auto-detection handles the common cases.
 - Place it at the **top-level scan directory** (e.g. `~/Projects/.swoop.toml`) to set defaults like `max_depth` for everything underneath.
-- Use `root = true` to prevent unrelated projects from being merged together.
+- Use `root = "self"` or `root = "children"` to prevent unrelated projects from being merged together.
 - Use `swoop --make-config .` to generate a template with all options commented out.
 
 ### 📝 Generate a template
@@ -175,6 +175,7 @@ nim c --threads:on -d:release -d:strip -d:lto --opt:speed -o:target/swoop src/sw
 ```bash
 swoop --make-config .              # Creates .swoop.toml in current dir
 swoop --make-config myconfig.toml  # Creates at specific path
+swoop --make-config -              # Print template to stdout
 ```
 
 ## 📖 Options reference
@@ -191,15 +192,20 @@ ignore = true
 
 ---
 
-#### `root` (bool, default: `false`)
+#### `root` (string, default: not set)
 
-Break the parent-child aggregation chain. Normally, nested projects roll up their clean targets to the nearest ancestor project. Setting `root = true` makes this directory appear as its own independent entry in the output.
+Break the parent-child aggregation chain. Normally, nested projects roll up their clean targets to the nearest ancestor project.
+
+- `root = "self"` — this directory appears as its own independent entry
+- `root = "children"` — each child project appears as its own independent entry
 
 ```toml
-root = true
+root = "self"
 ```
 
-**When to use:** You have a monorepo where `~/Projects` contains unrelated projects. Without `root = true` at the top level, a stray `Makefile` there could absorb everything underneath. Place `.swoop.toml` with `root = true` in each independent project, or at the top-level directory to prevent unwanted aggregation.
+**When to use:**
+- `"self"` — A sub-project should appear independently instead of being merged into its parent. For example, a `tools/cli/` project inside a monorepo would normally aggregate under the monorepo root — `root = "self"` makes it show as its own entry.
+- `"children"` — A directory groups multiple independent projects that should each appear separately. For example, `~/Projects/` contains `app-a/`, `app-b/`, `app-c/` — instead of putting `root = "self"` in each one, a single `root = "children"` in `~/Projects/.swoop.toml` detaches them all.
 
 ---
 
@@ -226,6 +232,18 @@ extra_clean = ["generated/", "custom-output/", "temp-data"]
 ```
 
 **When to use:** Your build system produces output that Swoop doesn't know about — e.g. a custom code generator that writes to `generated/`, or a Nimble project that builds to `target/` (non-standard for Nimble).
+
+---
+
+#### `extra_all` (array of strings, default: `[]`)
+
+Additional directories or files to mark as targets only removed with `--all`. Paths are relative to the directory containing this `.swoop.toml` and only apply to that project.
+
+```toml
+extra_all = ["build", "venv"]
+```
+
+**When to use:** Your project has cached output or environments that can be rebuilt but aren't detected by any analyzer — e.g. a custom `build/` from a shell script, or a manually created `venv/`.
 
 ---
 
