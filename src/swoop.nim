@@ -201,7 +201,12 @@ Options:
         echo "Pruned " & $orphanEmpty.len & " empty directories"
   elif not dryRun and scanResult.projects.len > 0:
     var totalBytes: int64 = 0
-    for p in scanResult.projects: totalBytes += p.totalSize
+    var hasEntries = false
+    for p in scanResult.projects:
+      totalBytes += p.totalSize
+      if p.entries.len > 0: hasEntries = true
+    if not hasEntries and orphanEmpty.len == 0:
+      quit(0)
     if not force and not quiet:
       stderr.write "Delete " & fmtSize(totalBytes, pad = false) & "? [y/N] "
       stderr.flushFile()
